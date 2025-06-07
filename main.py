@@ -9,15 +9,13 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler
 )
 
-# ------- VARIABLES -------
 (
-    MAIN_MENU, ASK_LANG, ASK_PHONE, ASK_REGION, ASK_PHOTO, ASK_SIZE,
+    MAIN_MENU, ASK_LANG, ASK_PHONE, ENTER_PHONE, ASK_REGION, ASK_PHOTO, ASK_SIZE,
     SETTINGS_MENU, CHANGE_LANG, CHANGE_REGION, CHANGE_NAME, CHANGE_PHONE
-) = range(11)
+) = range(12)
 
 user_data = {}
 
-# ------- GOOGLE SHEETS -------
 def get_gs_client():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
     creds_dict = json.loads(creds_json)
@@ -43,7 +41,6 @@ def write_to_sheets(data):
         data.get('date', ''),
     ])
 
-# ------- TEXTS -------
 TEXTS = {
     'uz': {
         'menu': "👇 Menyu:",
@@ -53,7 +50,8 @@ TEXTS = {
         'choose_lang': "Iltimos, tilni tanlang:",
         'lang_uz': "🇺🇿 O'zbekcha",
         'lang_ru': "🇷🇺 Русский",
-        'ask_phone': "Telefon raqamingizni ulashish yoki +998XXXXXXXXX tarzda qo‘lda kiriting:",
+        'ask_phone': "Telefon raqamingizni ulashish yoki \"✍️ Qo‘lda kiritish\" tugmasini bosing:",
+        'enter_phone': "📱 Telefon raqamingizni +998XXXXXXXXX shaklida kiriting:",
         'invalid_phone': "❌ <b>Xato!</b> Iltimos, quyidagi namunadek raqam kiriting:\n<b>+998889000232</b>",
         'phone_ok': "✅ Raqam qabul qilindi!",
         'ask_region': "📍 Viloyatingizni tanlang:",
@@ -84,7 +82,8 @@ TEXTS = {
         'choose_lang': "Пожалуйста, выберите язык:",
         'lang_uz': "🇺🇿 Узбекский",
         'lang_ru': "🇷🇺 Русский",
-        'ask_phone': "Отправьте свой номер или введите в формате +998XXXXXXXXX:",
+        'ask_phone': "Отправьте свой номер или нажмите кнопку \"✍️ Ввести вручную\":",
+        'enter_phone': "📱 Введите ваш номер в формате +998XXXXXXXXX:",
         'invalid_phone': "❌ <b>Ошибка!</b> Введите номер в формате:\n<b>+998889000232</b>",
         'phone_ok': "✅ Номер принят!",
         'ask_region': "📍 Выберите свой регион:",
@@ -124,7 +123,6 @@ def t(user_id, key):
     lang = get_lang(user_id)
     return TEXTS[lang][key]
 
-# ------- HANDLERS -------
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     markup = ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
@@ -156,7 +154,12 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
     if t(user_id, 'order') in text:
-        return await ask_phone(update, context)
+        # Foydalanuvchi ma'lumotlari saqlangan bo‘lsa, to‘g‘ridan-to‘g‘ri rasmga
+        if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
+            await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
+            return ASK_PHOTO
+        else:
+            return await ask_phone(update, context)
     elif t(user_id, 'profile') in text:
         info = user_data[user_id]
         await update.message.reply_text(
@@ -186,6 +189,10 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    # Agar foydalanuvchining ma'lumotlari bor bo'lsa, to'g'ridan-to'g'ri rasmga o'tadi
+    if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
+        await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
+        return ASK_PHOTO
     contact_btn = KeyboardButton("Telefon raqamingizni ulashish", request_contact=True)
     markup = ReplyKeyboardMarkup([[contact_btn], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True)
     await update.message.reply_text(t(user_id, 'ask_phone'), reply_markup=markup)
@@ -193,20 +200,35 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    contact = update.message.contact
-    if contact:
-        phone = contact.phone_number
-        name = contact.first_name or ""
+    # Foydalanuvchi telefonini kontakt orqali yuborsa
+    if update.message.contact:
+        phone = update.message.contact.phone_number
+        name = update.message.contact.first_name or ""
+        user_data[user_id]["phone"] = phone
+        user_data[user_id]["name"] = name
+        markup = ReplyKeyboardMarkup(REGIONS, resize_keyboard=True)
+        await update.message.reply_text(t(user_id, 'ask_region'), reply_markup=markup)
+        return ASK_REGION
+    # Foydalanuvchi "Qo‘lda kiritish" tugmasini bossachi? Unda endi enter_phone bosqichiga o'tadi
+    elif update.message.text and "Qo‘lda kiritish" in update.message.text:
+        await update.message.reply_text(t(user_id, 'enter_phone'), reply_markup=ReplyKeyboardRemove())
+        return ENTER_PHONE
     else:
-        phone = update.message.text.strip()
-        name = update.effective_user.first_name or ""
-        if not (phone.startswith("+998") and len(phone) == 13 and phone[1:].isdigit()):
-            await update.message.reply_text(
-                t(user_id, 'invalid_phone'),
-                parse_mode="HTML"
-            )
-            return ASK_PHONE
-        await update.message.reply_text(t(user_id, 'phone_ok'), parse_mode="HTML")
+        # Hech narsa bo‘lmasa yana telefon so‘raydi
+        await update.message.reply_text(t(user_id, 'ask_phone'), reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("Telefon raqamingizni ulashish", request_contact=True)], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True))
+        return ASK_PHONE
+
+async def handle_manual_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    phone = update.message.text.strip()
+    name = update.effective_user.first_name or ""
+    if not (phone.startswith("+998") and len(phone) == 13 and phone[1:].isdigit()):
+        await update.message.reply_text(
+            t(user_id, 'invalid_phone'),
+            parse_mode="HTML"
+        )
+        return ENTER_PHONE
     user_data[user_id]["phone"] = phone
     user_data[user_id]["name"] = name
     markup = ReplyKeyboardMarkup(REGIONS, resize_keyboard=True)
@@ -261,7 +283,6 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t(user_id, 'order_success'), reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True))
     return MAIN_MENU
 
-# --- Sozlamalar ---
 async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
@@ -326,7 +347,6 @@ async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t(user_id, 'changed'), reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True))
     return MAIN_MENU
 
-# --- MAIN APP ---
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
     conv_handler = ConversationHandler(
@@ -338,6 +358,7 @@ if __name__ == "__main__":
                 MessageHandler(filters.CONTACT, handle_phone),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_phone)
             ],
+            ENTER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_manual_phone)],
             ASK_REGION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_region)],
             ASK_PHOTO: [MessageHandler(filters.PHOTO, handle_photo)],
             ASK_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_size)],
