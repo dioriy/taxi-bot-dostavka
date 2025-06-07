@@ -3,16 +3,13 @@ import json
 from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
-
-from telegram import (
-    Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-)
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     filters, ContextTypes, ConversationHandler
 )
 
-# States
+# ------- VARIABLES -------
 (
     MAIN_MENU, ASK_LANG, ASK_PHONE, ASK_REGION, ASK_PHOTO, ASK_SIZE,
     SETTINGS_MENU, CHANGE_LANG, CHANGE_REGION, CHANGE_NAME, CHANGE_PHONE
@@ -20,7 +17,7 @@ from telegram.ext import (
 
 user_data = {}
 
-# --- Google Sheets funksiyasi ---
+# ------- GOOGLE SHEETS -------
 def get_gs_client():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
     creds_dict = json.loads(creds_json)
@@ -46,7 +43,7 @@ def write_to_sheets(data):
         data.get('date', ''),
     ])
 
-# --- Matn lug‘atlari ---
+# ------- TEXTS -------
 TEXTS = {
     'uz': {
         'menu': "👇 Menyu:",
@@ -56,7 +53,7 @@ TEXTS = {
         'choose_lang': "Iltimos, tilni tanlang:",
         'lang_uz': "🇺🇿 O'zbekcha",
         'lang_ru': "🇷🇺 Русский",
-        'ask_phone': "Telefon raqamingizni ulashish",
+        'ask_phone': "Telefon raqamingizni ulashish yoki +998XXXXXXXXX tarzda qo‘lda kiriting:",
         'invalid_phone': "❌ <b>Xato!</b> Iltimos, quyidagi namunadek raqam kiriting:\n<b>+998889000232</b>",
         'phone_ok': "✅ Raqam qabul qilindi!",
         'ask_region': "📍 Viloyatingizni tanlang:",
@@ -127,6 +124,7 @@ def t(user_id, key):
     lang = get_lang(user_id)
     return TEXTS[lang][key]
 
+# ------- HANDLERS -------
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     markup = ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
@@ -186,7 +184,6 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await menu(update, context)
         return MAIN_MENU
 
-# --- Buyurtma jarayoni ---
 async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     contact_btn = KeyboardButton("Telefon raqamingizni ulashish", request_contact=True)
@@ -203,7 +200,6 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         phone = update.message.text.strip()
         name = update.effective_user.first_name or ""
-        # Raqamni to'g'ri formatda tekshirish
         if not (phone.startswith("+998") and len(phone) == 13 and phone[1:].isdigit()):
             await update.message.reply_text(
                 t(user_id, 'invalid_phone'),
@@ -330,9 +326,9 @@ async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t(user_id, 'changed'), reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True))
     return MAIN_MENU
 
+# --- MAIN APP ---
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
-
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start), CommandHandler('menu', menu)],
         states={
@@ -353,7 +349,6 @@ if __name__ == "__main__":
         },
         fallbacks=[CommandHandler('menu', menu)],
     )
-
     app.add_handler(conv_handler)
     print("✅ Bot ishga tushdi, buyurtmalar va profil uchun tayyor!")
     app.run_polling()
