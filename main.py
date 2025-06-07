@@ -1,37 +1,68 @@
 import os
-from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+import json
+from datetime import datetime
+import gspread
+from google.oauth2.service_account import Credentials
+
+from telegram import (
+    Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+)
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     filters, ContextTypes, ConversationHandler
 )
-from datetime import datetime
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-GROUP_CHAT_ID = -4786339709  # Guruh ID
 
 # States
 (
-    MAIN_MENU, ASK_LANG, ASK_PHONE, ASK_REGION, ASK_PHOTO, ASK_SIZE, 
+    MAIN_MENU, ASK_LANG, ASK_PHONE, ASK_REGION, ASK_PHOTO, ASK_SIZE,
     SETTINGS_MENU, CHANGE_LANG, CHANGE_REGION, CHANGE_NAME, CHANGE_PHONE
 ) = range(11)
 
 user_data = {}
 
+# --- Google Sheets funksiyasi ---
+def get_gs_client():
+    creds_json = os.getenv("GOOGLE_CREDS_JSON")
+    creds_dict = json.loads(creds_json)
+    scope = [
+        'https://spreadsheets.google.com/feeds',
+        'https://www.googleapis.com/auth/drive',
+    ]
+    credentials = Credentials.from_service_account_info(creds_dict, scopes=scope)
+    client = gspread.authorize(credentials)
+    return client
+
+def write_to_sheets(data):
+    SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
+    SHEET_NAME = os.getenv("SHEET_NAME")
+    gc = get_gs_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    worksheet = sh.worksheet(SHEET_NAME)
+    worksheet.append_row([
+        data.get('name', ''),
+        data.get('phone', ''),
+        data.get('region', ''),
+        data.get('size', ''),
+        data.get('date', ''),
+    ])
+
+# --- Matn lug‘atlari ---
 TEXTS = {
     'uz': {
-        'menu': "👇 Menyu: ",
+        'menu': "👇 Menyu:",
         'profile': "👤 Profil",
         'settings': "⚙️ Sozlamalar",
         'order': "🛒 Yangi buyurtma",
         'choose_lang': "Iltimos, tilni tanlang:",
         'lang_uz': "🇺🇿 O'zbekcha",
         'lang_ru': "🇷🇺 Русский",
-        'ask_phone': "📞 Telefon raqamingizni ulashing",
-        'invalid_phone': "❌ Telefon raqam formati xato. Namuna: +998889000232",
+        'ask_phone': "Telefon raqamingizni ulashish",
+        'invalid_phone': "❌ <b>Xato!</b> Iltimos, quyidagi namunadek raqam kiriting:\n<b>+998889000232</b>",
+        'phone_ok': "✅ Raqam qabul qilindi!",
         'ask_region': "📍 Viloyatingizni tanlang:",
         'ask_photo': "📸 Buyurtma uchun rasm yuboring:",
         'ask_size': "📏 O‘lchamingizni kiriting:",
-        'order_success': "✅ Buyurtmangiz qabul qilindi!\n\nAsosiy menyuga qaytish uchun /menu buyrug'ini bosing yoki 'Menyu' tugmasidan foydalaning.",
+        'order_success': "✅ Buyurtmangiz qabul qilindi!\n\nAsosiy menyuga qaytish uchun /menu ni bosing yoki 'Menyu' tugmasidan foydalaning.",
         'new_order': "🆕 Yangi buyurtma!\n👤 Ism: {name}\n📞 Tel: {phone}\n📍 Viloyat: {region}\n📏 O‘lcham: {size}\n🕰 Sana: {date}",
         'settings_menu': "⚙️ Sozlamalar menyusi:\n\nQuyidagilardan birini tanlang:",
         'change_lang': "🌐 Tilni o‘zgartirish",
@@ -49,15 +80,16 @@ TEXTS = {
         'menu_btns': [["🛒 Yangi buyurtma"], ["👤 Profil", "⚙️ Sozlamalar"]],
     },
     'ru': {
-        'menu': "👇 Меню: ",
+        'menu': "👇 Меню:",
         'profile': "👤 Профиль",
         'settings': "⚙️ Настройки",
         'order': "🛒 Новый заказ",
         'choose_lang': "Пожалуйста, выберите язык:",
         'lang_uz': "🇺🇿 Узбекский",
         'lang_ru': "🇷🇺 Русский",
-        'ask_phone': "📞 Отправьте свой номер или введите в формате +998XXXXXXXXX:",
-        'invalid_phone': "❌ Неправильный формат номера. Пример: +998889000232",
+        'ask_phone': "Отправьте свой номер или введите в формате +998XXXXXXXXX:",
+        'invalid_phone': "❌ <b>Ошибка!</b> Введите номер в формате:\n<b>+998889000232</b>",
+        'phone_ok': "✅ Номер принят!",
         'ask_region': "📍 Выберите свой регион:",
         'ask_photo': "📸 Отправьте фото товара для заказа:",
         'ask_size': "📏 Введите ваш размер:",
@@ -157,7 +189,7 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Buyurtma jarayoni ---
 async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    contact_btn = KeyboardButton("📞 " + t(user_id, 'ask_phone'), request_contact=True)
+    contact_btn = KeyboardButton("Telefon raqamingizni ulashish", request_contact=True)
     markup = ReplyKeyboardMarkup([[contact_btn], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True)
     await update.message.reply_text(t(user_id, 'ask_phone'), reply_markup=markup)
     return ASK_PHONE
@@ -171,9 +203,14 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         phone = update.message.text.strip()
         name = update.effective_user.first_name or ""
-        if not phone.startswith("+998") or len(phone) != 13:
-            await update.message.reply_text(t(user_id, 'invalid_phone'))
+        # Raqamni to'g'ri formatda tekshirish
+        if not (phone.startswith("+998") and len(phone) == 13 and phone[1:].isdigit()):
+            await update.message.reply_text(
+                t(user_id, 'invalid_phone'),
+                parse_mode="HTML"
+            )
             return ASK_PHONE
+        await update.message.reply_text(t(user_id, 'phone_ok'), parse_mode="HTML")
     user_data[user_id]["phone"] = phone
     user_data[user_id]["name"] = name
     markup = ReplyKeyboardMarkup(REGIONS, resize_keyboard=True)
@@ -199,15 +236,29 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     size = update.message.text.strip()
     user_data[user_id]["size"] = size
     data = user_data[user_id]
+    order_info = {
+        'name': data.get('name', ''),
+        'phone': data.get('phone', ''),
+        'region': data.get('region', ''),
+        'size': data.get('size', ''),
+        'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+    # Google Sheetsga yozamiz
+    try:
+        write_to_sheets(order_info)
+    except Exception as e:
+        await update.message.reply_text(f"Google Sheets xatosi: {e}")
+
+    # Guruhga yuboramiz
     text = t(user_id, 'new_order').format(
-        name=data.get('name', '-'),
-        phone=data.get('phone', '-'),
-        region=data.get('region', '-'),
-        size=data.get('size', '-'),
-        date=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        name=order_info['name'],
+        phone=order_info['phone'],
+        region=order_info['region'],
+        size=order_info['size'],
+        date=order_info['date']
     )
     await context.bot.send_photo(
-        chat_id=GROUP_CHAT_ID,
+        chat_id=int(os.getenv("GROUP_CHAT_ID")),
         photo=data["photo"],
         caption=text
     )
@@ -269,15 +320,18 @@ async def change_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     phone = update.message.text.strip()
-    if not phone.startswith("+998") or len(phone) != 13:
-        await update.message.reply_text(t(user_id, 'invalid_phone'))
+    if not (phone.startswith("+998") and len(phone) == 13 and phone[1:].isdigit()):
+        await update.message.reply_text(
+            t(user_id, 'invalid_phone'),
+            parse_mode="HTML"
+        )
         return CHANGE_PHONE
     user_data[user_id]['phone'] = phone
     await update.message.reply_text(t(user_id, 'changed'), reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True))
     return MAIN_MENU
 
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start), CommandHandler('menu', menu)],
