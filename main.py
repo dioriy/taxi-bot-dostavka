@@ -26,7 +26,7 @@ TEXTS = {
         'choose_lang': "Iltimos, tilni tanlang:",
         'lang_uz': "🇺🇿 O'zbekcha",
         'lang_ru': "🇷🇺 Русский",
-        'ask_phone': "📞 Telefon raqamingizni ulashing yoki +998XXXXXXXXX tarzda qo‘lda kiriting:",
+        'ask_phone': "📞 Telefon raqamingizni ulashing",
         'invalid_phone': "❌ Telefon raqam formati xato. Namuna: +998889000232",
         'ask_region': "📍 Viloyatingizni tanlang:",
         'ask_photo': "📸 Buyurtma uchun rasm yuboring:",
