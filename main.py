@@ -350,7 +350,10 @@ async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start), CommandHandler('menu', menu)],
+        entry_points=[
+            CommandHandler('start', start),
+            CommandHandler('menu', menu)
+        ],
         states={
             ASK_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_lang)],
             MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_handler)],
@@ -368,7 +371,10 @@ if __name__ == "__main__":
             CHANGE_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_name)],
             CHANGE_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_phone)],
         },
-        fallbacks=[CommandHandler('menu', menu)],
+        fallbacks=[
+            CommandHandler('start', start),    # <<< MUHIM YANGILIK!
+            CommandHandler('menu', menu)
+        ],
     )
     app.add_handler(conv_handler)
     print("✅ Bot ishga tushdi, buyurtmalar va profil uchun tayyor!")
