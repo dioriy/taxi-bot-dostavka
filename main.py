@@ -46,7 +46,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         contact_btn = KeyboardButton("📞 Telefon raqamni yuborish", request_contact=True)
         markup = ReplyKeyboardMarkup([[contact_btn]], resize_keyboard=True, one_time_keyboard=True)
         await update.message.reply_text(
-            "👋 Xush kelibsiz!\n\n📞 Telefon raqamingizni ulashishingizni so‘raymiz:", reply_markup=markup)
+            "👋 Xush kelibsiz!\n\n📞 Iltimos telefon raqamingizni ulashishingizni so‘raymiz:", reply_markup=markup)
     else:
         # Agar allaqachon kontakt berilgan bo'lsa
         user_states[user_id] = 'ask_region'
@@ -63,7 +63,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     user_states[user_id] = 'ask_region'
     await update.message.reply_text(
-        "📍 Qaysi viloyatdasiz?", reply_markup=get_region_keyboard()
+        "📍 Buyurtmani qayerga yuboraylik?", reply_markup=get_region_keyboard()
     )
 
 async def handle_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -74,7 +74,7 @@ async def handle_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_data[user_id]['region'] = text
     user_states[user_id] = 'ask_photo'
-    await update.message.reply_text("🖼 Tovar rasmini yuboring:", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text("🖼 Iltimos sizga yoqgan maxsulotimiz rasmini yuboring:", reply_markup=ReplyKeyboardRemove())
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -83,7 +83,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_id = photo.file_id
     user_data[user_id]['photo_file_id'] = file_id
     user_states[user_id] = 'ask_size'
-    await update.message.reply_text("📏 O‘lchamingizni kiriting:")
+    await update.message.reply_text("📏 Iltimos o‘lchamingizni kiriting:")
 
 async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -122,7 +122,7 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(
-        "✅ Buyurtmangiz qabul qilindi!\n\nYana buyurtma uchun /start ni bosing."
+        "✅ Buyurtmangiz qabul qilindi! tez orada bizning operatorlarimiz siz bilan bog'lanishadi \n\nYana buyurtma uchun /start ni bosing."
     )
 
     # Foydalanuvchi holatini tozalash – ammo kontakt va ismni eslab qolamiz
