@@ -1,158 +1,135 @@
 import os
-import json
-from telegram import (
-    Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputFile
-)
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    filters, ContextTypes, ConversationHandler
 )
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-GROUP_CHAT_ID = -4786339709  # O'zgartirish kerak bo‘lsa, .envdan olasan
-GOOGLE_CREDS_JSON = os.environ.get("GOOGLE_CREDS_JSON")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GROUP_CHAT_ID = -4786339709  # Guruh ID
 
-# Google Sheets ulanish
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(GOOGLE_CREDS_JSON), scope)
-client = gspread.authorize(creds)
-sheet = client.open_by_url(
-    "https://docs.google.com/spreadsheets/d/1iZqsydjfN7hW6xKMsctHcc1gUrMR8o5cbACd3_Arfyo/edit#gid=1450330100"
-).sheet1
+# States for ConversationHandler
+ASK_PHONE, ASK_REGION, ASK_PHOTO, ASK_SIZE = range(4)
 
-user_states = {}  # Foydalanuvchi bosqichlarini saqlash uchun
-user_data = {}    # Foydalanuvchi ma’lumotlarini saqlash uchun
-
-# Viloyatlar ro'yxati
-regions = [
-    "Toshkent", "Toshkent viloyati", "Andijon", "Farg‘ona", "Namangan",
-    "Samarqand", "Buxoro", "Jizzax", "Sirdaryo", "Surxondaryo",
-    "Qashqadaryo", "Navoiy", "Xorazm", "Qoraqalpog‘iston"
-]
-
-def get_region_keyboard():
-    rows = []
-    for i in range(0, len(regions), 2):
-        rows.append([regions[i], regions[i+1]] if i+1 < len(regions) else [regions[i]])
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+# User data saqlanadi (RAMda)
+user_data = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in user_data:
-        user_data[user_id] = {}
-        user_states[user_id] = 'ask_contact'
-        contact_btn = KeyboardButton("📞 Telefon raqamni yuborish", request_contact=True)
-        markup = ReplyKeyboardMarkup([[contact_btn]], resize_keyboard=True, one_time_keyboard=True)
-        await update.message.reply_text(
-            "👋 Xush kelibsiz!\n\n📞 Iltimos telefon raqamingizni ulashishingizni so‘raymiz:", reply_markup=markup)
-    else:
-        # Agar allaqachon kontakt berilgan bo'lsa
-        user_states[user_id] = 'ask_region'
-        await update.message.reply_text(
-            "📍 Qaysi viloyatdasiz?", reply_markup=get_region_keyboard()
-        )
 
-async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Agar foydalanuvchi raqam va viloyatni avval kiritgan bo‘lsa, to‘g‘ridan-to‘g‘ri rasm bosqichiga o‘tkazamiz
+    if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
+        await update.message.reply_text("📸 Buyurtma uchun rasm yuboring:")
+        return ASK_PHOTO
+
+    # Agar faqat raqam kiritgan bo‘lsa, viloyat tanlashga o‘tkazamiz
+    if user_id in user_data and user_data[user_id].get("phone"):
+        return await ask_region(update, context)
+
+    # Telefon raqam so‘raymiz
+    contact_btn = KeyboardButton("📞 Raqamni yuborish", request_contact=True)
+    markup = ReplyKeyboardMarkup([[contact_btn], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True)
+    await update.message.reply_text(
+        "📞 Telefon raqamingizni ulashing yoki +998XXXXXXXXX tarzda qo‘lda kiriting:",
+        reply_markup=markup
+    )
+    return ASK_PHONE
+
+async def ask_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    viloyatlar = [
+        ["Toshkent", "Andijon", "Farg‘ona"],
+        ["Namangan", "Buxoro", "Jizzax"],
+        ["Xorazm", "Qashqadaryo", "Samarqand"],
+        ["Surxondaryo", "Sirdaryo", "Navoiy"],
+        ["Qoraqalpog‘iston"]
+    ]
+    markup = ReplyKeyboardMarkup(viloyatlar, resize_keyboard=True)
+    await update.message.reply_text(
+        "📍 Viloyatingizni tanlang:", reply_markup=markup
+    )
+    return ASK_REGION
+
+async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     contact = update.message.contact
-    user_data[user_id] = {
-        "name": f"{contact.first_name or ''} {contact.last_name or ''}".strip(),
-        "phone": contact.phone_number,
-    }
-    user_states[user_id] = 'ask_region'
-    await update.message.reply_text(
-        "📍 Buyurtmani qayerga yuboraylik?", reply_markup=get_region_keyboard()
-    )
+
+    if contact:
+        phone = contact.phone_number
+        name = contact.first_name or ""
+    else:
+        phone = update.message.text.strip()
+        name = update.effective_user.first_name or ""
+        if not phone.startswith("+998") or len(phone) != 13:
+            await update.message.reply_text("❌ Telefon raqam formati xato. Namuna: +998889000232")
+            return ASK_PHONE
+
+    # Ma’lumotlarni saqlash (agar oldin kiritilgan bo‘lsa yangilanmaydi)
+    if user_id not in user_data:
+        user_data[user_id] = {}
+    user_data[user_id]["phone"] = phone
+    user_data[user_id]["name"] = name
+
+    return await ask_region(update, context)
 
 async def handle_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text
-    if text not in regions:
-        await update.message.reply_text("Iltimos, quyidagi viloyatlardan birini tanlang.", reply_markup=get_region_keyboard())
-        return
-    user_data[user_id]['region'] = text
-    user_states[user_id] = 'ask_photo'
-    await update.message.reply_text("🖼 Iltimos sizga yoqgan maxsulotimiz rasmini yuboring:", reply_markup=ReplyKeyboardRemove())
+    region = update.message.text.strip()
+    user_data[user_id]["region"] = region
+    await update.message.reply_text("📸 Buyurtma uchun rasm yuboring:")
+    return ASK_PHOTO
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    # Rasmni olamiz va file_id ni saqlaymiz
-    photo = update.message.photo[-1]
-    file_id = photo.file_id
-    user_data[user_id]['photo_file_id'] = file_id
-    user_states[user_id] = 'ask_size'
-    await update.message.reply_text("📏 Iltimos o‘lchamingizni kiriting:")
+    photo_file_id = update.message.photo[-1].file_id
+    user_data[user_id]["photo"] = photo_file_id
+    await update.message.reply_text("📏 O‘lchamingizni kiriting:")
+    return ASK_SIZE
 
 async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    size = update.message.text
-    user_data[user_id]['size'] = size
+    size = update.message.text.strip()
+    user_data[user_id]["size"] = size
 
-    # Ma’lumotlarni Google Sheetsga yozamiz
+    # Buyurtma haqida ma'lumotni guruhga yuboramiz
     data = user_data[user_id]
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    # Rasm havolasini Telegram uchun tayyorlaymiz
-    photo_link = f"https://t.me/{context.bot.username}?start={data['photo_file_id']}"
-
-    sheet.append_row([
-        now,
-        data.get('name', ''),
-        data.get('phone', ''),
-        data.get('region', ''),
-        photo_link,   # Rasmni ko‘rish uchun havola (file_id saqlanadi)
-        data.get('size', ''),
-    ])
-
-    # Telegram guruhga xabar yuboramiz (rasm bilan)
-    caption = (
+    text = (
         f"🆕 Yangi buyurtma!\n"
-        f"👤 Ism: {data.get('name', '')}\n"
-        f"📞 Tel: {data.get('phone', '')}\n"
-        f"📍 Viloyat: {data.get('region', '')}\n"
+        f"👤 Ism: {data.get('name', 'Noma’lum')}\n"
+        f"📞 Tel: {data.get('phone', 'Noma’lum')}\n"
+        f"📍 Viloyat: {data.get('region', 'Noma’lum')}\n"
         f"📏 O‘lcham: {data.get('size', '')}\n"
-        f"🕑 Sana: {now}"
+        f"🕰 Sana: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
     await context.bot.send_photo(
         chat_id=GROUP_CHAT_ID,
-        photo=data['photo_file_id'],
-        caption=caption
+        photo=data["photo"],
+        caption=text
     )
+    await update.message.reply_text("✅ Buyurtmangiz qabul qilindi! Yangi buyurtma uchun /start ni bosing.")
+    return ConversationHandler.END
 
-    await update.message.reply_text(
-        "✅ Buyurtmangiz qabul qilindi! tez orada bizning operatorlarimiz siz bilan bog'lanishadi \n\nYana buyurtma uchun /start ni bosing."
-    )
+# Qo‘lda telefon kiritish
+async def manual_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_phone(update, context)
 
-    # Foydalanuvchi holatini tozalash – ammo kontakt va ismni eslab qolamiz
-    user_states[user_id] = 'ask_region'  # Keyingi safar regiondan boshlanadi
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    state = user_states.get(user_id, None)
-    if state == 'ask_region':
-        await handle_region(update, context)
-    elif state == 'ask_size':
-        await handle_size(update, context)
-    else:
-        await update.message.reply_text("Iltimos, botdan to‘g‘ri foydalaning yoki /start buyrug‘ini bosing.")
-
-async def handle_photo_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    state = user_states.get(user_id, None)
-    if state == 'ask_photo':
-        await handle_photo(update, context)
-    else:
-        await update.message.reply_text("Hozir rasm yuborishingiz shart emas. /start ni bosing.")
-
-def main():
+if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo_wrapper))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.run_polling()
 
-if __name__ == '__main__':
-    main()
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            ASK_PHONE: [
+                MessageHandler(filters.CONTACT, handle_phone),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, manual_phone)
+            ],
+            ASK_REGION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_region)],
+            ASK_PHOTO: [MessageHandler(filters.PHOTO, handle_photo)],
+            ASK_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_size)],
+        },
+        fallbacks=[],
+    )
+
+    app.add_handler(conv_handler)
+    print("✅ Bot ishga tushdi, buyurtmalar uchun tayyor!")
+    app.run_polling()
