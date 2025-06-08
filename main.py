@@ -259,7 +259,7 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'phone': data.get('phone', ''),
         'region': data.get('region', ''),
         'size': data.get('size', ''),
-        'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        'date': datetime.now(pytz.timezone('Asia/Tashkent')).strftime('%Y-%m-%d %H:%M:%S')
     }
     # Google Sheetsga yozamiz
     try:
