@@ -249,10 +249,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t(user_id, 'ask_size'))
     return ASK_SIZE
 
-from zoneinfo import ZoneInfo  # fayl boshida bo‘lsin
-
-# ...
-
 async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     size = update.message.text.strip()
@@ -263,10 +259,7 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'phone': data.get('phone', ''),
         'region': data.get('region', ''),
         'size': data.get('size', ''),
-        'date': datetime.now(ZoneInfo("Asia/Tashkent")).strftime('%Y-%m-%d %H:%M:%S')  # mana shu!
-    }
-    # ... qolgan kod
-
+        'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
     # Google Sheetsga yozamiz
     try:
