@@ -249,6 +249,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t(user_id, 'ask_size'))
     return ASK_SIZE
 
+import pytz  # Fayl boshida import qilingan bo‘lishi kerak
+
 async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     size = update.message.text.strip()
