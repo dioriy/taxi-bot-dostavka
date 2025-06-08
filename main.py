@@ -1,5 +1,6 @@
 import os
 import json
+import pytz
 from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
@@ -154,7 +155,6 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
     if t(user_id, 'order') in text:
-        # Foydalanuvchi ma'lumotlari saqlangan bo‘lsa, to‘g‘ridan-to‘g‘ri rasmga
         if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
             await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
             return ASK_PHOTO
@@ -189,7 +189,6 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    # Agar foydalanuvchining ma'lumotlari bor bo'lsa, to'g'ridan-to'g'ri rasmga o'tadi
     if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
         await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
         return ASK_PHOTO
@@ -200,7 +199,6 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    # Foydalanuvchi telefonini kontakt orqali yuborsa
     if update.message.contact:
         phone = update.message.contact.phone_number
         name = update.message.contact.first_name or ""
@@ -209,12 +207,10 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         markup = ReplyKeyboardMarkup(REGIONS, resize_keyboard=True)
         await update.message.reply_text(t(user_id, 'ask_region'), reply_markup=markup)
         return ASK_REGION
-    # Foydalanuvchi "Qo‘lda kiritish" tugmasini bossachi? Unda endi enter_phone bosqichiga o'tadi
     elif update.message.text and "Qo‘lda kiritish" in update.message.text:
         await update.message.reply_text(t(user_id, 'enter_phone'), reply_markup=ReplyKeyboardRemove())
         return ENTER_PHONE
     else:
-        # Hech narsa bo‘lmasa yana telefon so‘raydi
         await update.message.reply_text(t(user_id, 'ask_phone'), reply_markup=ReplyKeyboardMarkup(
             [[KeyboardButton("Telefon raqamingizni ulashish", request_contact=True)], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True))
         return ASK_PHONE
@@ -244,12 +240,14 @@ async def handle_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    # Faqat rasm kelganda saqlansin, boshqa holatda ogohlantir!
+    if not update.message.photo:
+        await update.message.reply_text("❗ Rasm yuboring.")
+        return ASK_PHOTO
     photo_file_id = update.message.photo[-1].file_id
     user_data[user_id]["photo"] = photo_file_id
     await update.message.reply_text(t(user_id, 'ask_size'))
     return ASK_SIZE
-
-import pytz  # Fayl boshida import qilingan bo‘lishi kerak
 
 async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -269,7 +267,8 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Google Sheets xatosi: {e}")
 
-    # Guruhga yuboramiz
+    # Guruhga yuborish, faqat rasm mavjud bo‘lsa!
+    photo = data.get("photo")
     text = t(user_id, 'new_order').format(
         name=order_info['name'],
         phone=order_info['phone'],
@@ -277,12 +276,22 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
         size=order_info['size'],
         date=order_info['date']
     )
-    await context.bot.send_photo(
-        chat_id=int(os.getenv("GROUP_CHAT_ID")),
-        photo=data["photo"],
-        caption=text
+    try:
+        if photo:
+            await context.bot.send_photo(
+                chat_id=int(os.getenv("GROUP_CHAT_ID")),
+                photo=photo,
+                caption=text
+            )
+        else:
+            await update.message.reply_text("❗ Rasm topilmadi, buyurtma guruhga yuborilmadi!")
+    except Exception as e:
+        await update.message.reply_text(f"Guruhga buyurtmani yuborishda xato: {e}")
+
+    await update.message.reply_text(
+        t(user_id, 'order_success'),
+        reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
     )
-    await update.message.reply_text(t(user_id, 'order_success'), reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True))
     return MAIN_MENU
 
 async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -319,21 +328,30 @@ async def change_lang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         lang = get_lang(user_id)
     user_data[user_id]['lang'] = lang
-    await update.message.reply_text(t(user_id, 'changed'), reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True))
+    await update.message.reply_text(
+        t(user_id, 'changed'),
+        reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
+    )
     return MAIN_MENU
 
 async def change_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     region = update.message.text.strip()
     user_data[user_id]['region'] = region
-    await update.message.reply_text(t(user_id, 'changed'), reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True))
+    await update.message.reply_text(
+        t(user_id, 'changed'),
+        reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
+    )
     return MAIN_MENU
 
 async def change_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     name = update.message.text.strip()
     user_data[user_id]['name'] = name
-    await update.message.reply_text(t(user_id, 'changed'), reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True))
+    await update.message.reply_text(
+        t(user_id, 'changed'),
+        reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
+    )
     return MAIN_MENU
 
 async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -346,7 +364,10 @@ async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CHANGE_PHONE
     user_data[user_id]['phone'] = phone
-    await update.message.reply_text(t(user_id, 'changed'), reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True))
+    await update.message.reply_text(
+        t(user_id, 'changed'),
+        reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
+    )
     return MAIN_MENU
 
 if __name__ == "__main__":
@@ -374,7 +395,7 @@ if __name__ == "__main__":
             CHANGE_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_phone)],
         },
         fallbacks=[
-            CommandHandler('start', start),    # <<< MUHIM YANGILIK!
+            CommandHandler('start', start),
             CommandHandler('menu', menu)
         ],
     )
