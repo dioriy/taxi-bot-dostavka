@@ -1,209 +1,135 @@
-
 import os
-import json
-import logging
-from datetime import datetime
-import pytz
-import gspread
-from google.oauth2.service_account import Credentials
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-
-# Set up logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    filters, ContextTypes, ConversationHandler
 )
-logger = logging.getLogger(__name__)
+from datetime import datetime
 
-# Global variables to store user state
-user_states = {}
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GROUP_CHAT_ID = -4786339709  # Guruh ID
 
-def setup_google_sheets():
-    """Setup Google Sheets connection"""
-    try:
-        # Get credentials from environment variable
-        creds_json = os.getenv('GOOGLE_CREDS_JSON')
-        if not creds_json:
-            logger.error("GOOGLE_CREDS_JSON environment variable not found")
-            return None
-            
-        # Parse the JSON credentials
-        creds_dict = json.loads(creds_json)
-        
-        # Define the scope
-        scope = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        
-        # Create credentials
-        credentials = Credentials.from_service_account_info(creds_dict, scopes=scope)
-        
-        # Connect to Google Sheets
-        gc = gspread.authorize(credentials)
-        
-        # Open the spreadsheet
-        spreadsheet_id = os.getenv('SPREADSHEET_ID')
-        if not spreadsheet_id:
-            logger.error("SPREADSHEET_ID environment variable not found")
-            return None
-            
-        sheet = gc.open_by_key(spreadsheet_id).sheet1
-        return sheet
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Error setting up Google Sheets: {e}")
-        return None
+# States for ConversationHandler
+ASK_PHONE, ASK_REGION, ASK_PHOTO, ASK_SIZE = range(4)
+
+# User data saqlanadi (RAMda)
+user_data = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command handler"""
-    keyboard = [
-        [KeyboardButton("🟢 Ishga keldim"), KeyboardButton("🔴 Ishdan ketdim")]
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    
-    await update.message.reply_text(
-        "Assalomu alaykum! Ishga kelish yoki ketishni belgilash uchun tugmani bosing:",
-        reply_markup=reply_markup
-    )
-
-async def handle_work_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle work status buttons"""
     user_id = update.effective_user.id
-    text = update.message.text
-    
-    # Store user state
-    if "Ishga keldim" in text:
-        user_states[user_id] = "came_to_work"
-        await update.message.reply_text(
-            "✅ 'Ishga keldim' belgilandi. Endi rasm yuboring."
-        )
-    elif "Ishdan ketdim" in text:
-        user_states[user_id] = "left_work"
-        await update.message.reply_text(
-            "✅ 'Ishdan ketdim' belgilandi. Endi rasm yuboring."
-        )
+
+    # Agar foydalanuvchi raqam va viloyatni avval kiritgan bo‘lsa, to‘g‘ridan-to‘g‘ri rasm bosqichiga o‘tkazamiz
+    if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
+        await update.message.reply_text("📸 Buyurtma uchun rasm yuboring:")
+        return ASK_PHOTO
+
+    # Agar faqat raqam kiritgan bo‘lsa, viloyat tanlashga o‘tkazamiz
+    if user_id in user_data and user_data[user_id].get("phone"):
+        return await ask_region(update, context)
+
+    # Telefon raqam so‘raymiz
+    contact_btn = KeyboardButton("📞 Raqamni yuborish", request_contact=True)
+    markup = ReplyKeyboardMarkup([[contact_btn], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True)
+    await update.message.reply_text(
+        "📞 Telefon raqamingizni ulashing yoki +998XXXXXXXXX tarzda qo‘lda kiriting:",
+        reply_markup=markup
+    )
+    return ASK_PHONE
+
+async def ask_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    viloyatlar = [
+        ["Toshkent", "Andijon", "Farg‘ona"],
+        ["Namangan", "Buxoro", "Jizzax"],
+        ["Xorazm", "Qashqadaryo", "Samarqand"],
+        ["Surxondaryo", "Sirdaryo", "Navoiy"],
+        ["Qoraqalpog‘iston"]
+    ]
+    markup = ReplyKeyboardMarkup(viloyatlar, resize_keyboard=True)
+    await update.message.reply_text(
+        "📍 Viloyatingizni tanlang:", reply_markup=markup
+    )
+    return ASK_REGION
+
+async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    contact = update.message.contact
+
+    if contact:
+        phone = contact.phone_number
+        name = contact.first_name or ""
+    else:
+        phone = update.message.text.strip()
+        name = update.effective_user.first_name or ""
+        if not phone.startswith("+998") or len(phone) != 13:
+            await update.message.reply_text("❌ Telefon raqam formati xato. Namuna: +998889000232")
+            return ASK_PHONE
+
+    # Ma’lumotlarni saqlash (agar oldin kiritilgan bo‘lsa yangilanmaydi)
+    if user_id not in user_data:
+        user_data[user_id] = {}
+    user_data[user_id]["phone"] = phone
+    user_data[user_id]["name"] = name
+
+    return await ask_region(update, context)
+
+async def handle_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    region = update.message.text.strip()
+    user_data[user_id]["region"] = region
+    await update.message.reply_text("📸 Buyurtma uchun rasm yuboring:")
+    return ASK_PHOTO
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle photo messages"""
     user_id = update.effective_user.id
-    user = update.effective_user
-    
-    # Check if user has selected work status
-    if user_id not in user_states:
-        await update.message.reply_text(
-            "❗️ Avval 'Ishga keldim' yoki 'Ishdan ketdim' tugmasini bosing, keyin rasm yuboring."
-        )
-        return
-    
-    try:
-        # Get current time in Tashkent timezone
-        tashkent_tz = pytz.timezone('Asia/Tashkent')
-        current_time = datetime.now(tashkent_tz)
-        
-        # Prepare data for Google Sheets
-        status = "Keldi" if user_states[user_id] == "came_to_work" else "Ketdi"
-        
-        # Setup Google Sheets
-        sheet = setup_google_sheets()
-        
-        if sheet:
-            try:
-                # Add row to Google Sheets
-                row_data = [
-                    current_time.strftime("%Y-%m-%d"),  # Date
-                    current_time.strftime("%H:%M:%S"),  # Time
-                    f"{user.first_name} {user.last_name or ''}".strip(),  # Full name
-                    user.username or "",  # Username
-                    str(user_id),  # User ID
-                    status,  # Status (Keldi/Ketdi)
-                    "Rasm yuborildi"  # Photo status
-                ]
-                
-                sheet.append_row(row_data)
-                
-                await update.message.reply_text(
-                    f"✅ Ma'lumot muvaffaqiyatli saqlandi!\n"
-                    f"📅 Sana: {current_time.strftime('%Y-%m-%d')}\n"
-                    f"⏰ Vaqt: {current_time.strftime('%H:%M:%S')}\n"
-                    f"👤 Foydalanuvchi: {user.first_name}\n"
-                    f"📊 Status: {status}\n"
-                    f"📸 Rasm: Qabul qilindi"
-                )
-                
-            except Exception as e:
-                logger.error(f"Error writing to Google Sheets: {e}")
-                await update.message.reply_text(
-                    f"❌ Google Sheets ga yozishda xatolik: {str(e)}\n"
-                    f"Lekin Telegram ma'lumoti saqlab qolindi."
-                )
-        else:
-            await update.message.reply_text(
-                "❌ Google Sheets ulanishi o'rnatilmadi. Faqat Telegram ma'lumoti saqlandi."
-            )
-        
-        # Send confirmation to group chat
-        group_chat_id = os.getenv('GROUP_CHAT_ID')
-        if group_chat_id:
-            try:
-                group_message = (
-                    f"📋 Yangi ma'lumot:\n"
-                    f"👤 {user.first_name} {user.last_name or ''}\n"
-                    f"📅 {current_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                    f"📊 {status}\n"
-                    f"📸 Rasm qabul qilindi"
-                )
-                
-                await context.bot.send_message(
-                    chat_id=group_chat_id,
-                    text=group_message
-                )
-                
-                # Forward the photo to group
-                await context.bot.forward_message(
-                    chat_id=group_chat_id,
-                    from_chat_id=update.effective_chat.id,
-                    message_id=update.message.message_id
-                )
-                
-            except Exception as e:
-                logger.error(f"Error sending to group: {e}")
-        
-        # Clear user state
-        del user_states[user_id]
-        
-    except Exception as e:
-        logger.error(f"Error handling photo: {e}")
-        await update.message.reply_text(
-            f"❌ Xatolik yuz berdi: {str(e)}"
-        )
+    photo_file_id = update.message.photo[-1].file_id
+    user_data[user_id]["photo"] = photo_file_id
+    await update.message.reply_text("📏 O‘lchamingizni kiriting:")
+    return ASK_SIZE
 
-def main():
-    """Main function"""
-    # Get bot token
-    bot_token = os.getenv('BOT_TOKEN')
-    if not bot_token:
-        logger.error("BOT_TOKEN environment variable not found")
-        return
-    
-    # Create application
-    application = Application.builder().token(bot_token).build()
-    
-    # Add handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(
-        filters.Regex("🟢 Ishga keldim|🔴 Ishdan ketdim"), 
-        handle_work_status
-    ))
-    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    
-    # Start the bot
-    logger.info("Bot ishga tushmoqda...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    size = update.message.text.strip()
+    user_data[user_id]["size"] = size
 
-if __name__ == '__main__':
-    main()
+    # Buyurtma haqida ma'lumotni guruhga yuboramiz
+    data = user_data[user_id]
+    text = (
+        f"🆕 Yangi buyurtma!\n"
+        f"👤 Ism: {data.get('name', 'Noma’lum')}\n"
+        f"📞 Tel: {data.get('phone', 'Noma’lum')}\n"
+        f"📍 Viloyat: {data.get('region', 'Noma’lum')}\n"
+        f"📏 O‘lcham: {data.get('size', '')}\n"
+        f"🕰 Sana: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    await context.bot.send_photo(
+        chat_id=GROUP_CHAT_ID,
+        photo=data["photo"],
+        caption=text
+    )
+    await update.message.reply_text("✅ Buyurtmangiz qabul qilindi! Yangi buyurtma uchun /start ni bosing.")
+    return ConversationHandler.END
+
+# Qo‘lda telefon kiritish
+async def manual_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_phone(update, context)
+
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            ASK_PHONE: [
+                MessageHandler(filters.CONTACT, handle_phone),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, manual_phone)
+            ],
+            ASK_REGION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_region)],
+            ASK_PHOTO: [MessageHandler(filters.PHOTO, handle_photo)],
+            ASK_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_size)],
+        },
+        fallbacks=[],
+    )
+
+    app.add_handler(conv_handler)
+    print("✅ Bot ishga tushdi, buyurtmalar uchun tayyor!")
+    app.run_polling()
