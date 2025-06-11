@@ -7,7 +7,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from telegram import (
     Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, 
-    InlineKeyboardButton, InlineKeyboardMarkup
+    InlineKeyboardButton, InlineKeyboardMarkup, Message
 )
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
@@ -21,7 +21,7 @@ from telegram.ext import (
 
 user_data = {}
 
-CHANNEL_USERNAME = "standartuzbekistan"  # Kanal username @siz, faqat nomi
+CHANNEL_USERNAME = "standartuzbekistan"  # Kanal username (faqat nomi, @siz)
 
 def get_gs_client():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
@@ -141,7 +141,7 @@ async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         member = await context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
         return member.status in ("member", "administrator", "creator")
-    except:
+    except Exception:
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -182,14 +182,15 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     subscribed = await check_subscription(update, context)
     if subscribed:
         await query.message.delete()
-        # Yangi start chaqirish uchun yangicha update yaratamiz
-        class DummyMessage:
-            def __init__(self, user_id):
-                self.from_user = type('User', (), {'id': user_id})()
-                self.effective_user = self.from_user
-                self.effective_chat = type('Chat', (), {'id': user_id})()
-            async def reply_text(self, *args, **kwargs): pass
-        fake_update = Update(update.update_id, message=DummyMessage(user_id))
+        # To'g'ri start chaqirish uchun yangi update yaratamiz
+        fake_message = Message(
+            message_id=update.effective_message.message_id,
+            date=update.effective_message.date,
+            chat=update.effective_message.chat,
+            from_user=update.effective_user,
+            text='/start'
+        )
+        fake_update = Update(update.update_id, message=fake_message)
         return await start(fake_update, context)
     else:
         await query.answer(t(user_id, 'not_subscribed'), show_alert=True)
@@ -469,6 +470,7 @@ async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
     )
     return MAIN_MENU
+
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
