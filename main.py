@@ -6,7 +6,8 @@ from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 from telegram import (
-    Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
+    Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, 
+    InlineKeyboardButton, InlineKeyboardMarkup
 )
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
@@ -20,7 +21,7 @@ from telegram.ext import (
 
 user_data = {}
 
-CHANNEL_USERNAME = "standartuzbekistan"  # faqat username, @siz
+CHANNEL_USERNAME = "standartuzbekistan"  # Kanal username @siz, faqat nomi
 
 def get_gs_client():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
@@ -136,7 +137,6 @@ def t(user_id, key):
     return TEXTS[lang][key]
 
 async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Obuna tekshiruvi"""
     user_id = update.effective_user.id
     member = await context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
     return member.status in ("member", "administrator", "creator")
@@ -146,10 +146,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in user_data:
         user_data[user_id] = {}
 
-    # OBUNA TEKSHIRUV
     subscribed = await check_subscription(update, context)
     if not subscribed:
-        lang = user_data.get(user_id, {}).get("lang", "uz")
         btn = InlineKeyboardMarkup([
             [InlineKeyboardButton(t(user_id, 'confirm'), callback_data="check_subscribe")]
         ])
@@ -160,14 +158,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CHECK_SUB
 
-    # 1. Intro video
     try:
         with open("intro.mp4", "rb") as video:
             await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=video)
     except Exception as e:
         await update.message.reply_text(f"❗ Intro video xato: {e}")
 
-    # Til tanlash
     markup = ReplyKeyboardMarkup(
         [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
         resize_keyboard=True,
@@ -183,12 +179,12 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     subscribed = await check_subscription(update, context)
     if subscribed:
         await query.message.delete()
-        # callback'dan so'ng start uchun message yasab yuboramiz
+        # Start funksiyani to'g'ri chaqirish uchun yangicha update yaratamiz
         class DummyMessage:
             def __init__(self, user_id):
-                self.from_user = type('from_user', (), {'id': user_id})()
+                self.from_user = type('User', (), {'id': user_id})()
                 self.effective_user = self.from_user
-                self.effective_chat = type('chat', (), {'id': user_id})()
+                self.effective_chat = type('Chat', (), {'id': user_id})()
             async def reply_text(self, *args, **kwargs): pass
         fake_update = Update(update.update_id, message=DummyMessage(user_id))
         return await start(fake_update, context)
@@ -220,7 +216,6 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if t(user_id, 'order') in text:
         if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
-            # 2. Rasm uchun video note
             try:
                 with open("photo_note.mp4", "rb") as vnote:
                     await context.bot.send_video_note(
@@ -368,7 +363,7 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Guruhga buyurtmani yuborishda xato: {e}")
 
-    # Dumaloq video va 2 soniyadan keyin matn
+    # Oxirgi muvaffaqiyat video (dumaloq) va 2 soniyadan keyin matn
     try:
         with open("success_note.mp4", "rb") as vnote:
             await context.bot.send_video_note(
@@ -463,13 +458,16 @@ async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler('start', start),
             CommandHandler('menu', menu)
         ],
         states={
-            CHECK_SUB: [MessageHandler(filters.ALL, lambda u, c: None)],  # bloklash uchun
+            CHECK_SUB: [
+                CallbackQueryHandler(check_sub_callback),
+            ],
             ASK_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_lang)],
             MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_handler)],
             ASK_PHONE: [
@@ -478,7 +476,7 @@ if __name__ == "__main__":
             ],
             ENTER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_manual_phone)],
             ASK_REGION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_region)],
-            ASK_PHOTO: [MessageHandler(filters.PHOTO, handle_photo), MessageHandler(filters.ALL, handle_photo)],
+            ASK_PHOTO: [MessageHandler(filters.PHOTO, handle_photo), MessageHandler(~filters.PHOTO & ~filters.COMMAND, handle_photo)],
             ASK_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_size)],
             SETTINGS_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_menu_handler)],
             CHANGE_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_lang)],
@@ -490,9 +488,10 @@ if __name__ == "__main__":
             CommandHandler('start', start),
             CommandHandler('menu', menu)
         ],
+        allow_reentry=True,
     )
+
     app.add_handler(conv_handler)
-    # MUHIM: callback uchun handler alohida qo'yiladi!
-    app.add_handler(CallbackQueryHandler(check_sub_callback, pattern="check_subscribe"))
+
     print("✅ Bot ishga tushdi, buyurtmalar va profil uchun tayyor!")
     app.run_polling()
