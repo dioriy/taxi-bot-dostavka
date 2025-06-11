@@ -68,7 +68,7 @@ def write_to_sheets(data):
 
 TEXTS = {
     'uz': {
-        'menu': "👇 Menyu:",
+        'menu': "👇Iltimos kerakli bo'limni tanlang:",
         'profile': "👤 Profil",
         'settings': "⚙️ Sozlamalar",
         'order': "🛒 Yangi buyurtma",
