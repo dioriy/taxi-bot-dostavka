@@ -21,7 +21,8 @@ from telegram.ext import (
 
 user_data = {}
 
-CHANNEL_USERNAME = "standartuzbekistan"  # faqat nomi, @siz
+CHANNEL_USERNAME = "standartuzbekistan"  # Kanal username @siz, faqat nomi
+ADMIN_IDS = [1813120014]  # O'ZINGIZNING TELEGRAM ID'ingiz
 
 def get_gs_client():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
@@ -477,6 +478,25 @@ async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MAIN_MENU
 
+# === ADMIN UCHUN BROADCAST FUNKSIYASI ===
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("Sizda bu funksiyani ishlatish uchun ruxsat yo‘q.")
+        return
+    if not context.args:
+        await update.message.reply_text("Xabar matnini /broadcast dan keyin yozing.")
+        return
+    text = " ".join(context.args)
+    count = 0
+    for uid in user_data.keys():
+        try:
+            await context.bot.send_message(chat_id=uid, text=text)
+            count += 1
+        except Exception:
+            continue
+    await update.message.reply_text(f"{count} ta foydalanuvchiga yuborildi.")
+
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
     conv_handler = ConversationHandler(
@@ -509,5 +529,8 @@ if __name__ == "__main__":
         allow_reentry=True,
     )
     app.add_handler(conv_handler)
+    # === Broadcast handler shu yerda ===
+    app.add_handler(CommandHandler("broadcast", broadcast))
+
     print("✅ Bot ishga tushdi, buyurtmalar va profil uchun tayyor!")
     app.run_polling()
