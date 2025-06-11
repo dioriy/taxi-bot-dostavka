@@ -6,7 +6,7 @@ from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 from telegram import (
-    Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, 
+    Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove,
     InlineKeyboardButton, InlineKeyboardMarkup
 )
 from telegram.ext import (
@@ -14,6 +14,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler
 )
 
+# Holatlar indeksi
 (
     MAIN_MENU, ASK_LANG, ASK_PHONE, ENTER_PHONE, ASK_REGION, ASK_PHOTO, ASK_SIZE,
     SETTINGS_MENU, CHANGE_LANG, CHANGE_REGION, CHANGE_NAME, CHANGE_PHONE, CHECK_SUB
@@ -21,8 +22,9 @@ from telegram.ext import (
 
 user_data = {}
 
-CHANNEL_USERNAME = "standartuzbekistan"  # Kanal username @siz, faqat nomi
+CHANNEL_USERNAME = "standartuzbekistan"  # Kanal username (@siz, faqat nomi)
 
+# Google Sheets bilan ishlash uchun funksiya
 def get_gs_client():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
     creds_dict = json.loads(creds_json)
@@ -48,6 +50,7 @@ def write_to_sheets(data):
         data.get('date', ''),
     ])
 
+# Matnlar lug'ati
 TEXTS = {
     'uz': {
         'menu': "👇 Menyu:",
@@ -79,10 +82,14 @@ TEXTS = {
         'set_lang': "Yangi tilni tanlang:",
         'lang_name': {'uz': "O‘zbekcha", 'ru': "Ruscha"},
         'changed': "✅ O‘zgartirildi!",
-        'subscribe': "Botdan foydalanish uchun 👉 [STANDART UZBEKISTAN](https://t.me/standartuzbekistan) kanaliga obuna bo‘ling.\n\nObuna bo‘lganingizdan so‘ng '✅ Tasdiqlash' tugmasini bosing.",
+        'subscribe': (
+            "Botdan foydalanish uchun 👉 [STANDART UZBEKISTAN](https://t.me/standartuzbekistan) kanaliga obuna bo‘ling.\n\n"
+            "Obuna bo‘lganingizdan so‘ng '✅ Tasdiqlash' tugmasini bosing."
+        ),
         'confirm': "✅ Tasdiqlash",
-        'not_subscribed': "Iltimos, avval kanalga obuna bo‘ling!",
+        'not_subscribed': "Kechirasiz, siz kanalga obuna bo‘lmagansiz. Iltimos, obuna bo‘ling!",
         'menu_btns': [["🛒 Yangi buyurtma"], ["👤 Profil", "⚙️ Sozlamalar"]],
+        'send_photo_first': "📸 Iltimos, buyurtma uchun rasm yuboring.",
     },
     'ru': {
         'menu': "👇 Меню:",
@@ -114,10 +121,14 @@ TEXTS = {
         'set_lang': "Выберите новый язык:",
         'lang_name': {'uz': "Узбекский", 'ru': "Русский"},
         'changed': "✅ Изменено!",
-        'subscribe': "Для использования бота подпишитесь на 👉 [STANDART UZBEKISTAN](https://t.me/standartuzbekistan).\n\nПосле подписки нажмите кнопку '✅ Подтвердить'.",
+        'subscribe': (
+            "Для использования бота подпишитесь на 👉 [STANDART UZBEKISTAN](https://t.me/standartuzbekistan).\n\n"
+            "После подписки нажмите кнопку '✅ Подтвердить'."
+        ),
         'confirm': "✅ Подтвердить",
-        'not_subscribed': "Пожалуйста, сначала подпишитесь на канал!",
+        'not_subscribed': "Извините, вы не подписаны на канал. Пожалуйста, подпишитесь!",
         'menu_btns': [["🛒 Новый заказ"], ["👤 Профиль", "⚙️ Настройки"]],
+        'send_photo_first': "📸 Пожалуйста, отправьте фото товара для заказа.",
     }
 }
 
@@ -138,8 +149,11 @@ def t(user_id, key):
 
 async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    member = await context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
-    return member.status in ("member", "administrator", "creator")
+    try:
+        member = await context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
+        return member.status in ("member", "administrator", "creator")
+    except Exception:
+        return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -179,7 +193,7 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     subscribed = await check_subscription(update, context)
     if subscribed:
         await query.message.delete()
-        # Start funksiyani to'g'ri chaqirish uchun yangicha update yaratamiz
+        # Start funksiyasini to'g'ri chaqirish uchun yangicha update yaratamiz
         class DummyMessage:
             def __init__(self, user_id):
                 self.from_user = type('User', (), {'id': user_id})()
@@ -319,8 +333,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(2)
         except Exception as e:
             await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
-        await update.message.reply_text("📸 Iltimos, buyurtma uchun rasm yuboring.")
+        await update.message.reply_text(t(user_id, 'send_photo_first'))
         return ASK_PHOTO
+
     photo_file_id = update.message.photo[-1].file_id
     user_data[user_id]["photo"] = photo_file_id
     await update.message.reply_text(t(user_id, 'ask_size'))
@@ -466,7 +481,7 @@ if __name__ == "__main__":
         ],
         states={
             CHECK_SUB: [
-                CallbackQueryHandler(check_sub_callback),
+                CallbackQueryHandler(check_sub_callback, pattern="check_subscribe"),
             ],
             ASK_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_lang)],
             MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_handler)],
@@ -476,7 +491,10 @@ if __name__ == "__main__":
             ],
             ENTER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_manual_phone)],
             ASK_REGION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_region)],
-            ASK_PHOTO: [MessageHandler(filters.PHOTO, handle_photo), MessageHandler(~filters.PHOTO & ~filters.COMMAND, handle_photo)],
+            ASK_PHOTO: [
+                MessageHandler(filters.PHOTO, handle_photo),
+                MessageHandler(~filters.PHOTO & ~filters.COMMAND, handle_photo)
+            ],
             ASK_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_size)],
             SETTINGS_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_menu_handler)],
             CHANGE_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_lang)],
