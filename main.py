@@ -21,8 +21,24 @@ from telegram.ext import (
 
 user_data = {}
 
-CHANNEL_USERNAME = "standartuzbekistan"  # Kanal username @siz, faqat nomi
-ADMIN_IDS = [1813120014]  # O'ZINGIZNING TELEGRAM ID'ingiz
+CHANNEL_USERNAME = "standartuzbekistan"  # @sizsiz
+ADMIN_IDS = [1813120014]
+USER_IDS_FILE = "user_ids.txt"
+
+def save_user_id(user_id):
+    user_id = str(user_id)
+    if not os.path.exists(USER_IDS_FILE):
+        open(USER_IDS_FILE, "w").close()
+    with open(USER_IDS_FILE, "r+") as f:
+        ids = set(line.strip() for line in f if line.strip())
+        if user_id not in ids:
+            f.write(user_id + "\n")
+
+def load_user_ids():
+    if not os.path.exists(USER_IDS_FILE):
+        return []
+    with open(USER_IDS_FILE, "r") as f:
+        return [int(line.strip()) for line in f if line.strip()]
 
 def get_gs_client():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
@@ -148,6 +164,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in user_data:
         user_data[user_id] = {}
+    save_user_id(user_id)
 
     # OBUNA TEKSHIRISH
     subscribed = await check_subscription(user_id, context)
@@ -169,7 +186,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return CHECK_SUB
 
-    # Videoni yuborish va til tanlash
     try:
         with open("intro.mp4", "rb") as video:
             await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=video)
@@ -192,15 +208,14 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     user_id = query.from_user.id
     await query.answer()
+    save_user_id(user_id)
     subscribed = await check_subscription(user_id, context)
     if subscribed:
-        # VIDEO yuborish va TIL tanlash shu joyda!
         try:
             with open("intro.mp4", "rb") as video:
                 await context.bot.send_video_note(chat_id=query.message.chat.id, video_note=video)
         except Exception as e:
             await query.message.reply_text(f"❗ Intro video xato: {e}")
-
         markup = ReplyKeyboardMarkup(
             [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
             resize_keyboard=True,
@@ -222,7 +237,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ask_lang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
-    if 'O‘zbek' in text or 'O\'zbek' in text or 'Uzbek' in text:
+    if 'O‘zbek' in text or 'O\'zbek' in text or 'Uzbek' in text or 'Узбекский' in text:
         lang = 'uz'
     elif 'Русский' in text or 'Russian' in text:
         lang = 'ru'
@@ -325,7 +340,6 @@ async def handle_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     region = update.message.text.strip()
     user_data[user_id]["region"] = region
-    # Rasm uchun birinchi video va text
     try:
         with open("photo_note.mp4", "rb") as vnote:
             await context.bot.send_video_note(
@@ -385,7 +399,6 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Guruhga buyurtmani yuborishda xato: {e}")
 
-    # Tabrik video va matn
     try:
         with open("success_note.mp4", "rb") as vnote:
             await context.bot.send_video_note(
@@ -429,7 +442,7 @@ async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TY
 async def change_lang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
-    if 'O‘zbek' in text or 'O\'zbek' in text or 'Uzbek' in text:
+    if 'O‘zbek' in text or 'O\'zbek' in text or 'Uzbek' in text or 'Узбекский' in text:
         lang = 'uz'
     elif 'Русский' in text or 'Russian' in text:
         lang = 'ru'
@@ -478,24 +491,45 @@ async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MAIN_MENU
 
-# === ADMIN UCHUN BROADCAST FUNKSIYASI ===
+# ======================== BROADCAST (matn, foto, video, link) ========================
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ADMIN_IDS:
         await update.message.reply_text("Sizda bu funksiyani ishlatish uchun ruxsat yo‘q.")
         return
-    if not context.args:
-        await update.message.reply_text("Xabar matnini /broadcast dan keyin yozing.")
-        return
-    text = " ".join(context.args)
+
+    message = update.message
+    user_ids = load_user_ids()
     count = 0
-    for uid in user_data.keys():
-        try:
-            await context.bot.send_message(chat_id=uid, text=text)
-            count += 1
-        except Exception:
-            continue
-    await update.message.reply_text(f"{count} ta foydalanuvchiga yuborildi.")
+    errors = 0
+
+    if message.reply_to_message and message.reply_to_message.photo:
+        file_id = message.reply_to_message.photo[-1].file_id
+        caption = " ".join(context.args) if context.args else ""
+        for uid in user_ids:
+            try:
+                await context.bot.send_photo(chat_id=uid, photo=file_id, caption=caption)
+                count += 1
+            except Exception:
+                errors += 1
+    elif message.reply_to_message and message.reply_to_message.video:
+        file_id = message.reply_to_message.video.file_id
+        caption = " ".join(context.args) if context.args else ""
+        for uid in user_ids:
+            try:
+                await context.bot.send_video(chat_id=uid, video=file_id, caption=caption)
+                count += 1
+            except Exception:
+                errors += 1
+    else:
+        text = " ".join(context.args) if context.args else ""
+        for uid in user_ids:
+            try:
+                await context.bot.send_message(chat_id=uid, text=text)
+                count += 1
+            except Exception:
+                errors += 1
+    await update.message.reply_text(f"Broadcast: {count} ta foydalanuvchiga yuborildi, xato: {errors}.")
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
@@ -529,8 +563,6 @@ if __name__ == "__main__":
         allow_reentry=True,
     )
     app.add_handler(conv_handler)
-    # === Broadcast handler shu yerda ===
     app.add_handler(CommandHandler("broadcast", broadcast))
-
     print("✅ Bot ishga tushdi, buyurtmalar va profil uchun tayyor!")
     app.run_polling()
