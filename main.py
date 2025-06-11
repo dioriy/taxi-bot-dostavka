@@ -9,7 +9,7 @@ from telegram import (
     Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 )
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
+    ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
     filters, ContextTypes, ConversationHandler
 )
 
@@ -183,7 +183,11 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     subscribed = await check_subscription(update, context)
     if subscribed:
         await query.message.delete()
-        return await start(update, context)
+        # Yangi start chaqirilsin
+        fake_update = Update.de_json({'message': {
+            'message_id': 1, 'from': {'id': user_id}, 'chat': {'id': user_id}, 'date': 0
+        }}, context.bot)
+        return await start(fake_update, context)
     else:
         await query.answer(t(user_id, 'not_subscribed'), show_alert=True)
         return CHECK_SUB
@@ -461,9 +465,7 @@ if __name__ == "__main__":
             CommandHandler('menu', menu)
         ],
         states={
-            CHECK_SUB: [MessageHandler(filters.ALL, lambda u, c: None),  # bloklash uchun
-                        CommandHandler('start', start),
-                        MessageHandler(filters.CallbackQueryHandler, check_sub_callback)],
+            CHECK_SUB: [MessageHandler(filters.ALL, lambda u, c: None)],  # bloklash uchun
             ASK_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_lang)],
             MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_handler)],
             ASK_PHONE: [
@@ -485,8 +487,8 @@ if __name__ == "__main__":
             CommandHandler('menu', menu)
         ],
     )
-    # Inline callback uchun
-    app.add_handler(MessageHandler(filters.CallbackQueryHandler, check_sub_callback))
     app.add_handler(conv_handler)
+    # MUHIM: callback uchun handler alohida qo'yiladi!
+    app.add_handler(CallbackQueryHandler(check_sub_callback, pattern="check_subscribe"))
     print("✅ Bot ishga tushdi, buyurtmalar va profil uchun tayyor!")
     app.run_polling()
