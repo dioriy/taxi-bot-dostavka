@@ -176,7 +176,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(TEXTS['uz']['choose_lang'], reply_markup=markup)
     return ASK_LANG
-
 async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -184,9 +183,45 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     subscribed = await check_subscription(update, context)
     if subscribed:
         await query.message.delete()
-        # Start funksiyasini yangilab chaqirish uchun
-        await start(update, context)
-        return ASK_LANG
+        # Start funksiyasini chaqirish va natijani return qilish juda muhim
+        return await start(update, context)  # return qo'shildi
+    else:
+        await query.answer(t(user_id, 'not_subscribed_alert'), show_alert=True)
+        return CHECK_SUB
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in user_data:
+        user_data[user_id] = {}
+
+    subscribed = await check_subscription(update, context)
+    if not subscribed:
+        btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton(t(user_id, 'confirm'), callback_data="check_subscribe")]
+        ])
+        await update.message.reply_text(
+            t(user_id, 'subscribe'),
+            reply_markup=btn,
+            parse_mode="Markdown"
+        )
+        return CHECK_SUB
+
+    # Video yuboriladi
+    try:
+        with open("intro.mp4", "rb") as video:
+            await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=video)
+    except Exception as e:
+        await update.message.reply_text(f"❗ Intro video xato: {e}")
+
+    # TIL TANLASH MATNI VA KLAVIATURA
+    markup = ReplyKeyboardMarkup(
+        [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await update.message.reply_text(TEXTS['uz']['choose_lang'], reply_markup=markup)
+    return ASK_LANG   # return qo'shildi, muhim!!!
+
     else:
         await query.answer(t(user_id, 'not_subscribed_alert'), show_alert=True)
         return CHECK_SUB
