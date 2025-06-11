@@ -211,7 +211,7 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     subscribed = await check_subscription(user_id, context)
     if subscribed:
         try:
-            with open("intro.mp4", " "rb") as video:
+            with open("intro.mp4", "rb") as video:
                 await context.bot.send_video_note(chat_id=query.message.chat.id, video_note=video)
         except Exception as e:
             await query.message.reply_text(f"❗ Intro video xato: {e}")
