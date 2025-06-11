@@ -183,10 +183,14 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     subscribed = await check_subscription(update, context)
     if subscribed:
         await query.message.delete()
-        # Yangi start chaqirilsin
-        fake_update = Update.de_json({'message': {
-            'message_id': 1, 'from': {'id': user_id}, 'chat': {'id': user_id}, 'date': 0
-        }}, context.bot)
+        # callback'dan so'ng start uchun message yasab yuboramiz
+        class DummyMessage:
+            def __init__(self, user_id):
+                self.from_user = type('from_user', (), {'id': user_id})()
+                self.effective_user = self.from_user
+                self.effective_chat = type('chat', (), {'id': user_id})()
+            async def reply_text(self, *args, **kwargs): pass
+        fake_update = Update(update.update_id, message=DummyMessage(user_id))
         return await start(fake_update, context)
     else:
         await query.answer(t(user_id, 'not_subscribed'), show_alert=True)
