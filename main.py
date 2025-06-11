@@ -14,25 +14,23 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler
 )
 
+# Holatlar
 (
     MAIN_MENU, ASK_LANG, ASK_PHONE, ENTER_PHONE, ASK_REGION, ASK_PHOTO, ASK_SIZE,
     SETTINGS_MENU, CHANGE_LANG, CHANGE_REGION, CHANGE_NAME, CHANGE_PHONE, CHECK_SUB
 ) = range(13)
 
+CHANNEL_USERNAME = "standartuzbekistan"  # @siz yozing, faqat username!
+
 user_data = {}
 
-CHANNEL_USERNAME = "standartuzbekistan"  # Kanal username, @siz
-
+# Google Sheets bilan bog'lanish
 def get_gs_client():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
     creds_dict = json.loads(creds_json)
-    scope = [
-        'https://spreadsheets.google.com/feeds',
-        'https://www.googleapis.com/auth/drive',
-    ]
+    scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
     credentials = Credentials.from_service_account_info(creds_dict, scopes=scope)
-    client = gspread.authorize(credentials)
-    return client
+    return gspread.authorize(credentials)
 
 def write_to_sheets(data):
     SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
@@ -62,7 +60,8 @@ TEXTS = {
         'invalid_phone': "❌ <b>Xato!</b> Iltimos, quyidagi namunadek raqam kiriting:\n<b>+998889000232</b>",
         'phone_ok': "✅ Raqam qabul qilindi!",
         'ask_region': "📍 Viloyatingizni tanlang:",
-        'ask_photo': "📸 Buyurtma uchun rasm yuboring:",
+        'ask_photo_video_caption': "📸 Buyurtma uchun rasm yuboring:",
+        'ask_photo_text': "📸 Iltimos, buyurtma uchun rasm yuboring.",
         'ask_size': "📏 O‘lchamingizni kiriting:",
         'order_success': "✅ Buyurtmangiz qabul qilindi!\n\nAsosiy menyuga qaytish uchun /menu ni bosing yoki 'Menyu' tugmasidan foydalaning.",
         'new_order': "🆕 Yangi buyurtma!\n👤 Ism: {name}\n📞 Tel: {phone}\n📍 Viloyat: {region}\n📏 O‘lcham: {size}\n🕰 Sana: {date}",
@@ -81,7 +80,7 @@ TEXTS = {
         'changed': "✅ O‘zgartirildi!",
         'subscribe': "Botdan foydalanish uchun 👉 [STANDART UZBEKISTAN](https://t.me/standartuzbekistan) kanaliga obuna bo‘ling.\n\nObuna bo‘lganingizdan so‘ng '✅ Tasdiqlash' tugmasini bosing.",
         'confirm': "✅ Tasdiqlash",
-        'not_subscribed': "❗ Iltimos, kanalga obuna bo‘ling va keyin qaytadan '✅ Tasdiqlash' tugmasini bosing!",
+        'not_subscribed_alert': "Siz kanalga a'zo emassiz! Iltimos, avval kanalga obuna bo'ling.",
         'menu_btns': [["🛒 Yangi buyurtma"], ["👤 Profil", "⚙️ Sozlamalar"]],
     },
     'ru': {
@@ -97,7 +96,8 @@ TEXTS = {
         'invalid_phone': "❌ <b>Ошибка!</b> Введите номер в формате:\n<b>+998889000232</b>",
         'phone_ok': "✅ Номер принят!",
         'ask_region': "📍 Выберите свой регион:",
-        'ask_photo': "📸 Отправьте фото товара для заказа:",
+        'ask_photo_video_caption': "📸 Отправьте фото товара для заказа:",
+        'ask_photo_text': "📸 Пожалуйста, отправьте фото для заказа.",
         'ask_size': "📏 Введите ваш размер:",
         'order_success': "✅ Ваш заказ принят!\n\nДля возврата в главное меню нажмите /menu или используйте кнопку 'Меню'.",
         'new_order': "🆕 Новый заказ!\n👤 Имя: {name}\n📞 Тел: {phone}\n📍 Регион: {region}\n📏 Размер: {size}\n🕰 Дата: {date}",
@@ -116,7 +116,7 @@ TEXTS = {
         'changed': "✅ Изменено!",
         'subscribe': "Для использования бота подпишитесь на 👉 [STANDART UZBEKISTAN](https://t.me/standartuzbekistan).\n\nПосле подписки нажмите кнопку '✅ Подтвердить'.",
         'confirm': "✅ Подтвердить",
-        'not_subscribed': "❗ Пожалуйста, подпишитесь на канал и повторите попытку, нажав '✅ Подтвердить'!",
+        'not_subscribed_alert': "Вы не подписаны на канал! Пожалуйста, подпишитесь сначала.",
         'menu_btns': [["🛒 Новый заказ"], ["👤 Профиль", "⚙️ Настройки"]],
     }
 }
@@ -136,13 +136,13 @@ def t(user_id, key):
     lang = get_lang(user_id)
     return TEXTS[lang][key]
 
-async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user_id = update.effective_user.id
     try:
         member = await context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
         return member.status in ("member", "administrator", "creator")
     except Exception:
-        # Foydalanuvchi ma'lumotini olishda xato bo'lsa, masalan, kanal yopiq yoki foydalanuvchi topilmasa
+        # Obuna tekshirishda xatolik, odatda kanaldan foydalanuvchi haqida ma'lumot olish mumkin emasligi
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -162,6 +162,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CHECK_SUB
 
+    # Obuna bo‘lsa, intro video
     try:
         with open("intro.mp4", "rb") as video:
             await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=video)
@@ -183,18 +184,11 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     subscribed = await check_subscription(update, context)
     if subscribed:
         await query.message.delete()
-        # Dummy update yaratish
-        class DummyMessage:
-            def __init__(self, user_id):
-                self.from_user = type('User', (), {'id': user_id})()
-                self.effective_user = self.from_user
-                self.effective_chat = type('Chat', (), {'id': user_id})()
-            async def reply_text(self, *args, **kwargs): pass
-        fake_update = Update(update.update_id, message=DummyMessage(user_id))
-        return await start(fake_update, context)
+        # Start funksiyasini yangilab chaqirish uchun
+        await start(update, context)
+        return ASK_LANG
     else:
-        # Kanalga a’zo bo‘lmaganiga ogohlantirish
-        await query.answer(t(user_id, 'not_subscribed'), show_alert=True)
+        await query.answer(t(user_id, 'not_subscribed_alert'), show_alert=True)
         return CHECK_SUB
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -230,7 +224,7 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await asyncio.sleep(2)
             except Exception as e:
                 await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
-            await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text(t(user_id, 'ask_photo_text'), reply_markup=ReplyKeyboardRemove())
             return ASK_PHOTO
         else:
             return await ask_phone(update, context)
@@ -264,7 +258,7 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
-        await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(t(user_id, 'ask_photo_text'), reply_markup=ReplyKeyboardRemove())
         return ASK_PHOTO
     contact_btn = KeyboardButton("Telefon raqamingizni ulashish", request_contact=True)
     markup = ReplyKeyboardMarkup([[contact_btn], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True)
@@ -309,7 +303,7 @@ async def handle_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     region = update.message.text.strip()
     user_data[user_id]["region"] = region
-    await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text(t(user_id, 'ask_photo_text'), reply_markup=ReplyKeyboardRemove())
     return ASK_PHOTO
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -324,8 +318,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(2)
         except Exception as e:
             await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
-        await update.message.reply_text("📸 Iltimos, buyurtma uchun rasm yuboring.")
+        await update.message.reply_text(t(user_id, 'ask_photo_text'))
         return ASK_PHOTO
+
     photo_file_id = update.message.photo[-1].file_id
     user_data[user_id]["photo"] = photo_file_id
     await update.message.reply_text(t(user_id, 'ask_size'))
@@ -368,7 +363,7 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Guruhga buyurtmani yuborishda xato: {e}")
 
-    # Yakuniy video va 2 soniyadan keyin tasdiq matni
+    # Muvaffaqiyat video va 2 soniyadan keyin matn
     try:
         with open("success_note.mp4", "rb") as vnote:
             await context.bot.send_video_note(
@@ -470,9 +465,7 @@ if __name__ == "__main__":
             CommandHandler('menu', menu)
         ],
         states={
-            CHECK_SUB: [
-                CallbackQueryHandler(check_sub_callback),
-            ],
+            CHECK_SUB: [CallbackQueryHandler(check_sub_callback)],
             ASK_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_lang)],
             MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_handler)],
             ASK_PHONE: [
@@ -481,7 +474,10 @@ if __name__ == "__main__":
             ],
             ENTER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_manual_phone)],
             ASK_REGION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_region)],
-            ASK_PHOTO: [MessageHandler(filters.PHOTO, handle_photo), MessageHandler(~filters.PHOTO & ~filters.COMMAND, handle_photo)],
+            ASK_PHOTO: [
+                MessageHandler(filters.PHOTO, handle_photo),
+                MessageHandler(~filters.PHOTO & ~filters.COMMAND, handle_photo)
+            ],
             ASK_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_size)],
             SETTINGS_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_menu_handler)],
             CHANGE_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_lang)],
@@ -497,6 +493,5 @@ if __name__ == "__main__":
     )
 
     app.add_handler(conv_handler)
-
     print("✅ Bot ishga tushdi, buyurtmalar va profil uchun tayyor!")
     app.run_polling()
