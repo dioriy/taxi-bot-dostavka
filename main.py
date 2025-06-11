@@ -135,16 +135,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in user_data:
         user_data[user_id] = {}
 
-    # 🎥 Video yuboriladi
+    # 🎥 Dumaloq video (video note) yuboriladi
     try:
         with open("intro.mp4", "rb") as video:
-            await context.bot.send_video(
+            await context.bot.send_video_note(
                 chat_id=update.effective_chat.id,
-                video=video,
-                caption="Assalomu alaykum! Bu bizning xizmatimiz haqida qisqacha video 🎥"
+                video_note=video
+                # length=8  # ixtiyoriy: sekund
             )
     except Exception as e:
         await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
+
+    markup = ReplyKeyboardMarkup(
+        [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await update.message.reply_text(TEXTS['uz']['choose_lang'], reply_markup=markup)
+    return ASK_LANG
 
     # 🌐 Til tanlash menyusi
     markup = ReplyKeyboardMarkup(
