@@ -6,7 +6,7 @@ from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 from telegram import (
-    Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, 
+    Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove,
     InlineKeyboardButton, InlineKeyboardMarkup
 )
 from telegram.ext import (
@@ -20,17 +20,21 @@ from telegram.ext import (
     SETTINGS_MENU, CHANGE_LANG, CHANGE_REGION, CHANGE_NAME, CHANGE_PHONE, CHECK_SUB
 ) = range(13)
 
-CHANNEL_USERNAME = "standartuzbekistan"  # @siz yozing, faqat username!
-
 user_data = {}
 
-# Google Sheets bilan bog'lanish
+CHANNEL_USERNAME = "standartuzbekistan"  # kanal username (@siz)
+
+# Google Sheets bilan ishlash uchun helperlar
 def get_gs_client():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
     creds_dict = json.loads(creds_json)
-    scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
+    scope = [
+        'https://spreadsheets.google.com/feeds',
+        'https://www.googleapis.com/auth/drive',
+    ]
     credentials = Credentials.from_service_account_info(creds_dict, scopes=scope)
-    return gspread.authorize(credentials)
+    client = gspread.authorize(credentials)
+    return client
 
 def write_to_sheets(data):
     SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
@@ -46,6 +50,7 @@ def write_to_sheets(data):
         data.get('date', ''),
     ])
 
+# Matnlar lug'ati
 TEXTS = {
     'uz': {
         'menu': "👇 Menyu:",
@@ -60,8 +65,7 @@ TEXTS = {
         'invalid_phone': "❌ <b>Xato!</b> Iltimos, quyidagi namunadek raqam kiriting:\n<b>+998889000232</b>",
         'phone_ok': "✅ Raqam qabul qilindi!",
         'ask_region': "📍 Viloyatingizni tanlang:",
-        'ask_photo_video_caption': "📸 Buyurtma uchun rasm yuboring:",
-        'ask_photo_text': "📸 Iltimos, buyurtma uchun rasm yuboring.",
+        'ask_photo': "📸 Buyurtma uchun rasm yuboring:",
         'ask_size': "📏 O‘lchamingizni kiriting:",
         'order_success': "✅ Buyurtmangiz qabul qilindi!\n\nAsosiy menyuga qaytish uchun /menu ni bosing yoki 'Menyu' tugmasidan foydalaning.",
         'new_order': "🆕 Yangi buyurtma!\n👤 Ism: {name}\n📞 Tel: {phone}\n📍 Viloyat: {region}\n📏 O‘lcham: {size}\n🕰 Sana: {date}",
@@ -80,7 +84,7 @@ TEXTS = {
         'changed': "✅ O‘zgartirildi!",
         'subscribe': "Botdan foydalanish uchun 👉 [STANDART UZBEKISTAN](https://t.me/standartuzbekistan) kanaliga obuna bo‘ling.\n\nObuna bo‘lganingizdan so‘ng '✅ Tasdiqlash' tugmasini bosing.",
         'confirm': "✅ Tasdiqlash",
-        'not_subscribed_alert': "Siz kanalga a'zo emassiz! Iltimos, avval kanalga obuna bo'ling.",
+        'not_subscribed_alert': "❌ Iltimos, avval kanalga obuna bo‘ling!",
         'menu_btns': [["🛒 Yangi buyurtma"], ["👤 Profil", "⚙️ Sozlamalar"]],
     },
     'ru': {
@@ -96,8 +100,7 @@ TEXTS = {
         'invalid_phone': "❌ <b>Ошибка!</b> Введите номер в формате:\n<b>+998889000232</b>",
         'phone_ok': "✅ Номер принят!",
         'ask_region': "📍 Выберите свой регион:",
-        'ask_photo_video_caption': "📸 Отправьте фото товара для заказа:",
-        'ask_photo_text': "📸 Пожалуйста, отправьте фото для заказа.",
+        'ask_photo': "📸 Отправьте фото товара для заказа:",
         'ask_size': "📏 Введите ваш размер:",
         'order_success': "✅ Ваш заказ принят!\n\nДля возврата в главное меню нажмите /menu или используйте кнопку 'Меню'.",
         'new_order': "🆕 Новый заказ!\n👤 Имя: {name}\n📞 Тел: {phone}\n📍 Регион: {region}\n📏 Размер: {size}\n🕰 Дата: {date}",
@@ -116,7 +119,7 @@ TEXTS = {
         'changed': "✅ Изменено!",
         'subscribe': "Для использования бота подпишитесь на 👉 [STANDART UZBEKISTAN](https://t.me/standartuzbekistan).\n\nПосле подписки нажмите кнопку '✅ Подтвердить'.",
         'confirm': "✅ Подтвердить",
-        'not_subscribed_alert': "Вы не подписаны на канал! Пожалуйста, подпишитесь сначала.",
+        'not_subscribed_alert': "❌ Пожалуйста, сначала подпишитесь на канал!",
         'menu_btns': [["🛒 Новый заказ"], ["👤 Профиль", "⚙️ Настройки"]],
     }
 }
@@ -129,6 +132,7 @@ REGIONS = [
     ["Qoraqalpog‘iston"]
 ]
 
+# Tilni olish
 def get_lang(user_id):
     return user_data.get(user_id, {}).get("lang", "uz")
 
@@ -136,15 +140,17 @@ def t(user_id, key):
     lang = get_lang(user_id)
     return TEXTS[lang][key]
 
-async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+# Kanalga a'zo bo'lishni tekshirish
+async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     try:
         member = await context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
         return member.status in ("member", "administrator", "creator")
     except Exception:
-        # Obuna tekshirishda xatolik, odatda kanaldan foydalanuvchi haqida ma'lumot olish mumkin emasligi
+        # Agar kanal ma'lumotini olishda xato bo'lsa (masalan, foydalanuvchi kanalga a'zo emas)
         return False
 
+# Start funksiyasi
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in user_data:
@@ -162,13 +168,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CHECK_SUB
 
-    # Obuna bo‘lsa, intro video
+    # Intro video
     try:
         with open("intro.mp4", "rb") as video:
             await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=video)
     except Exception as e:
         await update.message.reply_text(f"❗ Intro video xato: {e}")
 
+    # Til tanlash
     markup = ReplyKeyboardMarkup(
         [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
         resize_keyboard=True,
@@ -176,6 +183,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(TEXTS['uz']['choose_lang'], reply_markup=markup)
     return ASK_LANG
+
+# Callback - tasdiqlash tugmasi
 async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -183,55 +192,19 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     subscribed = await check_subscription(update, context)
     if subscribed:
         await query.message.delete()
-        # Start funksiyasini chaqirish va natijani return qilish juda muhim
-        return await start(update, context)  # return qo'shildi
+        return await start(update, context)
     else:
         await query.answer(t(user_id, 'not_subscribed_alert'), show_alert=True)
         return CHECK_SUB
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in user_data:
-        user_data[user_id] = {}
-
-    subscribed = await check_subscription(update, context)
-    if not subscribed:
-        btn = InlineKeyboardMarkup([
-            [InlineKeyboardButton(t(user_id, 'confirm'), callback_data="check_subscribe")]
-        ])
-        await update.message.reply_text(
-            t(user_id, 'subscribe'),
-            reply_markup=btn,
-            parse_mode="Markdown"
-        )
-        return CHECK_SUB
-
-    # Video yuboriladi
-    try:
-        with open("intro.mp4", "rb") as video:
-            await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=video)
-    except Exception as e:
-        await update.message.reply_text(f"❗ Intro video xato: {e}")
-
-    # TIL TANLASH MATNI VA KLAVIATURA
-    markup = ReplyKeyboardMarkup(
-        [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    await update.message.reply_text(TEXTS['uz']['choose_lang'], reply_markup=markup)
-    return ASK_LANG   # return qo'shildi, muhim!!!
-
-    else:
-        await query.answer(t(user_id, 'not_subscribed_alert'), show_alert=True)
-        return CHECK_SUB
-
+# Menu ko'rsatish
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     markup = ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
     await update.message.reply_text(t(user_id, 'menu'), reply_markup=markup)
     return MAIN_MENU
 
+# Til tanlash
 async def ask_lang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
@@ -245,21 +218,20 @@ async def ask_lang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await menu(update, context)
     return MAIN_MENU
 
+# Asosiy menyu
 async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
     if t(user_id, 'order') in text:
         if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
+            # Rasm uchun video note yuborish
             try:
                 with open("photo_note.mp4", "rb") as vnote:
-                    await context.bot.send_video_note(
-                        chat_id=update.effective_chat.id,
-                        video_note=vnote
-                    )
+                    await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=vnote)
                 await asyncio.sleep(2)
             except Exception as e:
                 await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
-            await update.message.reply_text(t(user_id, 'ask_photo_text'), reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
             return ASK_PHOTO
         else:
             return await ask_phone(update, context)
@@ -290,16 +262,18 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await menu(update, context)
         return MAIN_MENU
 
+# Telefon raqamini so'rash
 async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
-        await update.message.reply_text(t(user_id, 'ask_photo_text'), reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
         return ASK_PHOTO
     contact_btn = KeyboardButton("Telefon raqamingizni ulashish", request_contact=True)
     markup = ReplyKeyboardMarkup([[contact_btn], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True)
     await update.message.reply_text(t(user_id, 'ask_phone'), reply_markup=markup)
     return ASK_PHONE
 
+# Telefon raqamini olish
 async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if update.message.contact:
@@ -318,6 +292,7 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [[KeyboardButton("Telefon raqamingizni ulashish", request_contact=True)], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True))
         return ASK_PHONE
 
+# Qo'lda kiritilgan raqamni tekshirish
 async def handle_manual_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     phone = update.message.text.strip()
@@ -334,33 +309,32 @@ async def handle_manual_phone(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(t(user_id, 'ask_region'), reply_markup=markup)
     return ASK_REGION
 
+# Viloyat tanlash
 async def handle_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     region = update.message.text.strip()
     user_data[user_id]["region"] = region
-    await update.message.reply_text(t(user_id, 'ask_photo_text'), reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
     return ASK_PHOTO
 
+# Rasm qabul qilish va video yuborish
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not update.message.photo:
         try:
             with open("photo_note.mp4", "rb") as vnote:
-                await context.bot.send_video_note(
-                    chat_id=update.effective_chat.id,
-                    video_note=vnote
-                )
+                await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=vnote)
             await asyncio.sleep(2)
         except Exception as e:
             await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
-        await update.message.reply_text(t(user_id, 'ask_photo_text'))
+        await update.message.reply_text("📸 Iltimos, buyurtma uchun rasm yuboring.")
         return ASK_PHOTO
-
     photo_file_id = update.message.photo[-1].file_id
     user_data[user_id]["photo"] = photo_file_id
     await update.message.reply_text(t(user_id, 'ask_size'))
     return ASK_SIZE
 
+# O'lcham qabul qilish va buyurtmani yakunlash
 async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     size = update.message.text.strip()
@@ -398,13 +372,10 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Guruhga buyurtmani yuborishda xato: {e}")
 
-    # Muvaffaqiyat video va 2 soniyadan keyin matn
+    # Buyurtma qabul qilindi video va xabar
     try:
         with open("success_note.mp4", "rb") as vnote:
-            await context.bot.send_video_note(
-                chat_id=update.effective_chat.id,
-                video_note=vnote
-            )
+            await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=vnote)
         await asyncio.sleep(2)
         await update.message.reply_text(
             t(user_id, 'order_success'),
@@ -415,6 +386,7 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return MAIN_MENU
 
+# Sozlamalar menyusi
 async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
@@ -439,6 +411,7 @@ async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await menu(update, context)
         return MAIN_MENU
 
+# Tilni o'zgartirish
 async def change_lang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
@@ -455,6 +428,7 @@ async def change_lang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MAIN_MENU
 
+# Viloyatni o'zgartirish
 async def change_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     region = update.message.text.strip()
@@ -465,6 +439,7 @@ async def change_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MAIN_MENU
 
+# Ismni o'zgartirish
 async def change_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     name = update.message.text.strip()
@@ -475,6 +450,7 @@ async def change_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MAIN_MENU
 
+# Telefon raqamni o'zgartirish
 async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     phone = update.message.text.strip()
@@ -491,6 +467,7 @@ async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return MAIN_MENU
 
+# Bot ishga tushirish qismi
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
 
@@ -500,7 +477,9 @@ if __name__ == "__main__":
             CommandHandler('menu', menu)
         ],
         states={
-            CHECK_SUB: [CallbackQueryHandler(check_sub_callback)],
+            CHECK_SUB: [
+                CallbackQueryHandler(check_sub_callback),
+            ],
             ASK_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_lang)],
             MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_handler)],
             ASK_PHONE: [
@@ -528,5 +507,6 @@ if __name__ == "__main__":
     )
 
     app.add_handler(conv_handler)
+
     print("✅ Bot ishga tushdi, buyurtmalar va profil uchun tayyor!")
     app.run_polling()
