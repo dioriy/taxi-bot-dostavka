@@ -6,7 +6,7 @@ from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 from telegram import (
-    Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove,
+    Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, 
     InlineKeyboardButton, InlineKeyboardMarkup
 )
 from telegram.ext import (
@@ -21,7 +21,7 @@ from telegram.ext import (
 
 user_data = {}
 
-CHANNEL_USERNAME = "standartuzbekistan"  # Kanal username, @siz yozing
+CHANNEL_USERNAME = "standartuzbekistan"  # Kanal username @siz, faqat nomi
 
 def get_gs_client():
     creds_json = os.getenv("GOOGLE_CREDS_JSON")
@@ -81,7 +81,7 @@ TEXTS = {
         'changed': "✅ O‘zgartirildi!",
         'subscribe': "Botdan foydalanish uchun 👉 [STANDART UZBEKISTAN](https://t.me/standartuzbekistan) kanaliga obuna bo‘ling.\n\nObuna bo‘lganingizdan so‘ng '✅ Tasdiqlash' tugmasini bosing.",
         'confirm': "✅ Tasdiqlash",
-        'not_subscribed_alert': "❌ Siz hali kanalga obuna bo‘lmagansiz. Iltimos, kanalga obuna bo‘ling!",
+        'not_subscribed': "❌ Kechirasiz, siz kanalga obuna bo‘lmagansiz! Iltimos, avval kanalga obuna bo‘ling va keyin '✅ Tasdiqlash' tugmasini bosing.",
         'menu_btns': [["🛒 Yangi buyurtma"], ["👤 Profil", "⚙️ Sozlamalar"]],
     },
     'ru': {
@@ -116,7 +116,7 @@ TEXTS = {
         'changed': "✅ Изменено!",
         'subscribe': "Для использования бота подпишитесь на 👉 [STANDART UZBEKISTAN](https://t.me/standartuzbekistan).\n\nПосле подписки нажмите кнопку '✅ Подтвердить'.",
         'confirm': "✅ Подтвердить",
-        'not_subscribed_alert': "❌ Вы еще не подписались на канал. Пожалуйста, подпишитесь!",
+        'not_subscribed': "❌ Извините, вы не подписаны на канал! Пожалуйста, сначала подпишитесь и нажмите кнопку '✅ Подтвердить'.",
         'menu_btns': [["🛒 Новый заказ"], ["👤 Профиль", "⚙️ Настройки"]],
     }
 }
@@ -141,8 +141,7 @@ async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         member = await context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
         return member.status in ("member", "administrator", "creator")
-    except Exception:
-        # Kanalni tekshirishda xatolik (masalan, foydalanuvchi bloklangan yoki kanal maxfiy bo‘lsa)
+    except:
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -162,12 +161,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CHECK_SUB
 
-    # Agar obuna bo‘lsa, intro video + til tanlash
     try:
         with open("intro.mp4", "rb") as video:
             await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=video)
     except Exception as e:
-        await update.message.reply_text(f"❗ Intro video yuborishda xato: {e}")
+        await update.message.reply_text(f"❗ Intro video xato: {e}")
 
     markup = ReplyKeyboardMarkup(
         [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
@@ -184,22 +182,17 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     subscribed = await check_subscription(update, context)
     if subscribed:
         await query.message.delete()
-        # Intro video + til tanlashni yuborish:
-        try:
-            with open("intro.mp4", "rb") as video:
-                await context.bot.send_video_note(chat_id=user_id, video_note=video)
-        except Exception as e:
-            await context.bot.send_message(chat_id=user_id, text=f"❗ Intro video xato: {e}")
-
-        markup = ReplyKeyboardMarkup(
-            [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
-        await context.bot.send_message(chat_id=user_id, text=TEXTS['uz']['choose_lang'], reply_markup=markup)
-        return ASK_LANG
+        # Yangi start chaqirish uchun yangicha update yaratamiz
+        class DummyMessage:
+            def __init__(self, user_id):
+                self.from_user = type('User', (), {'id': user_id})()
+                self.effective_user = self.from_user
+                self.effective_chat = type('Chat', (), {'id': user_id})()
+            async def reply_text(self, *args, **kwargs): pass
+        fake_update = Update(update.update_id, message=DummyMessage(user_id))
+        return await start(fake_update, context)
     else:
-        await query.answer(t(user_id, 'not_subscribed_alert'), show_alert=True)
+        await query.answer(t(user_id, 'not_subscribed'), show_alert=True)
         return CHECK_SUB
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -226,13 +219,16 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if t(user_id, 'order') in text:
         if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
-            # Rasm uchun video note va keyin matn
             try:
                 with open("photo_note.mp4", "rb") as vnote:
-                    await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=vnote)
+                    await context.bot.send_video_note(
+                        chat_id=update.effective_chat.id,
+                        video_note=vnote
+                    )
                 await asyncio.sleep(2)
             except Exception as e:
                 await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
+
             await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
             return ASK_PHOTO
         else:
@@ -267,8 +263,18 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
+        try:
+            with open("photo_note.mp4", "rb") as vnote:
+                await context.bot.send_video_note(
+                    chat_id=update.effective_chat.id,
+                    video_note=vnote
+                )
+            await asyncio.sleep(2)
+        except Exception as e:
+            await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
         await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
         return ASK_PHOTO
+
     contact_btn = KeyboardButton("Telefon raqamingizni ulashish", request_contact=True)
     markup = ReplyKeyboardMarkup([[contact_btn], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True)
     await update.message.reply_text(t(user_id, 'ask_phone'), reply_markup=markup)
@@ -312,18 +318,21 @@ async def handle_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     region = update.message.text.strip()
     user_data[user_id]["region"] = region
+    try:
+        with open("photo_note.mp4", "rb") as vnote:
+            await context.bot.send_video_note(
+                chat_id=update.effective_chat.id,
+                video_note=vnote
+            )
+        await asyncio.sleep(2)
+    except Exception as e:
+        await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
     await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
     return ASK_PHOTO
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not update.message.photo:
-        try:
-            with open("photo_note.mp4", "rb") as vnote:
-                await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=vnote)
-            await asyncio.sleep(2)
-        except Exception as e:
-            await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
         await update.message.reply_text("📸 Iltimos, buyurtma uchun rasm yuboring.")
         return ASK_PHOTO
     photo_file_id = update.message.photo[-1].file_id
@@ -368,9 +377,13 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Guruhga buyurtmani yuborishda xato: {e}")
 
+    # Oxirgi muvaffaqiyat video (dumaloq) va 2 soniyadan keyin matn
     try:
         with open("success_note.mp4", "rb") as vnote:
-            await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=vnote)
+            await context.bot.send_video_note(
+                chat_id=update.effective_chat.id,
+                video_note=vnote
+            )
         await asyncio.sleep(2)
         await update.message.reply_text(
             t(user_id, 'order_success'),
@@ -456,7 +469,6 @@ async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
     )
     return MAIN_MENU
-
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
