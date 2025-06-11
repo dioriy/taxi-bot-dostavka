@@ -1,6 +1,7 @@
 import os
 import json
 import pytz
+import asyncio
 from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
@@ -135,26 +136,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in user_data:
         user_data[user_id] = {}
 
-    # 🎥 Dumaloq video (video note) yuboriladi
+    # 🎥 Dumaloq video (intro)
     try:
         with open("intro.mp4", "rb") as video:
             await context.bot.send_video_note(
                 chat_id=update.effective_chat.id,
                 video_note=video
-                # length=8  # ixtiyoriy: sekund
             )
     except Exception as e:
         await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
 
-    markup = ReplyKeyboardMarkup(
-        [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    await update.message.reply_text(TEXTS['uz']['choose_lang'], reply_markup=markup)
-    return ASK_LANG
-
-    # 🌐 Til tanlash menyusi
     markup = ReplyKeyboardMarkup(
         [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
         resize_keyboard=True,
@@ -265,9 +256,22 @@ async def handle_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    # Rasm kelmasa, dumaloq video va matn chiqadi
     if not update.message.photo:
-        await update.message.reply_text("❗ Rasm yuboring.")
+        try:
+            with open("photo_note.mp4", "rb") as vnote:
+                await context.bot.send_video_note(
+                    chat_id=update.effective_chat.id,
+                    video_note=vnote
+                )
+            await asyncio.sleep(2)
+        except Exception as e:
+            await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
+
+        await update.message.reply_text("📸 Iltimos, buyurtma uchun rasm yuboring.")
         return ASK_PHOTO
+
+    # Rasm kelgan bo‘lsa, davom etadi
     photo_file_id = update.message.photo[-1].file_id
     user_data[user_id]["photo"] = photo_file_id
     await update.message.reply_text(t(user_id, 'ask_size'))
@@ -310,10 +314,21 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Guruhga buyurtmani yuborishda xato: {e}")
 
-    await update.message.reply_text(
-        t(user_id, 'order_success'),
-        reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
-    )
+    # Dumaloq video va 2 soniyadan keyin matn
+    try:
+        with open("success_note.mp4", "rb") as vnote:
+            await context.bot.send_video_note(
+                chat_id=update.effective_chat.id,
+                video_note=vnote
+            )
+        await asyncio.sleep(2)
+        await update.message.reply_text(
+            t(user_id, 'order_success'),
+            reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
+
     return MAIN_MENU
 
 async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -408,7 +423,7 @@ if __name__ == "__main__":
             ],
             ENTER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_manual_phone)],
             ASK_REGION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_region)],
-            ASK_PHOTO: [MessageHandler(filters.PHOTO, handle_photo)],
+            ASK_PHOTO: [MessageHandler(filters.PHOTO, handle_photo), MessageHandler(filters.ALL, handle_photo)],
             ASK_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_size)],
             SETTINGS_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_menu_handler)],
             CHANGE_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_lang)],
