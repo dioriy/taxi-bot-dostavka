@@ -15,14 +15,13 @@ from telegram.ext import (
 )
 
 (
-    MAIN_MENU, ASK_LANG, ASK_PHONE, ENTER_PHONE, ASK_REGION, ASK_PHOTO, ASK_SIZE,
+    MAIN_MENU, ASK_LANG, ASK_NAME, ASK_PHONE, ENTER_PHONE, ASK_REGION, ASK_PHOTO, ASK_SIZE,
     SETTINGS_MENU, CHANGE_LANG, CHANGE_REGION, CHANGE_NAME, CHANGE_PHONE, CHECK_SUB
-) = range(13)
+) = range(14)
 
 user_data = {}
 CHANNEL_USERNAME = "standartuzbekistan"
 ADMIN_IDS = [1813120014]  # O'zingizning Telegram ID
-
 USERS_FILE = "users.json"
 
 def load_users():
@@ -73,6 +72,7 @@ TEXTS = {
         'choose_lang': "Iltimos, tilni tanlang:",
         'lang_uz': "🇺🇿 O'zbekcha",
         'lang_ru': "🇷🇺 Русский",
+        'ask_name': "Ismingizni kiriting:",
         'ask_phone': "Telefon raqamingizni ulashish yoki \"✍️ Qo‘lda kiritish\" tugmasini bosing:",
         'enter_phone': "📱 Telefon raqamingizni +998XXXXXXXXX shaklida kiriting:",
         'invalid_phone': "❌ <b>Xato!</b> Iltimos, quyidagi namunadek raqam kiriting:\n<b>+998889000232</b>",
@@ -108,6 +108,7 @@ TEXTS = {
         'choose_lang': "Пожалуйста, выберите язык:",
         'lang_uz': "🇺🇿 Узбекский",
         'lang_ru': "🇷🇺 Русский",
+        'ask_name': "Введите ваше имя:",
         'ask_phone': "Отправьте свой номер или нажмите \"✍️ Ввести вручную\":",
         'enter_phone': "📱 Введите ваш номер в формате +998XXXXXXXXX:",
         'invalid_phone': "❌ <b>Ошибка!</b> Введите номер, например:\n<b>+998889000232</b>",
@@ -161,7 +162,7 @@ async def check_subscription(user_id, context):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    save_user(user_id)  # Yangi foydalanuvchini faylga yozib boramiz!
+    save_user(user_id)
     if user_id not in user_data:
         user_data[user_id] = {}
 
@@ -184,23 +185,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return CHECK_SUB
 
-    try:
-        with open("intro.mp4", "rb") as video:
-            await context.bot.send_video_note(chat_id=update.effective_chat.id, video_note=video)
-    except Exception as e:
-        if hasattr(update, "message") and update.message:
-            await update.message.reply_text(f"❗ Intro video xato: {e}")
-
-    markup = ReplyKeyboardMarkup(
-        [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    if hasattr(update, "message") and update.message:
+    # Agar foydalanuvchi ro‘yxatdan o‘tmagan bo‘lsa, barcha maydonlarni to‘ldirtiramiz:
+    if not user_data[user_id].get("lang"):
+        markup = ReplyKeyboardMarkup(
+            [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
+            resize_keyboard=True, one_time_keyboard=True
+        )
         await update.message.reply_text(TEXTS['uz']['choose_lang'], reply_markup=markup)
-    elif hasattr(update, "callback_query") and update.callback_query:
-        await update.callback_query.message.reply_text(TEXTS['uz']['choose_lang'], reply_markup=markup)
-    return ASK_LANG
+        return ASK_LANG
+
+    if not user_data[user_id].get("name"):
+        await update.message.reply_text(t(user_id, 'ask_name'), reply_markup=ReplyKeyboardRemove())
+        return ASK_NAME
+
+    if not user_data[user_id].get("phone"):
+        contact_btn = KeyboardButton("Telefon raqamingizni ulashish", request_contact=True)
+        markup = ReplyKeyboardMarkup([[contact_btn], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True)
+        await update.message.reply_text(t(user_id, 'ask_phone'), reply_markup=markup)
+        return ASK_PHONE
+
+    if not user_data[user_id].get("region"):
+        markup = ReplyKeyboardMarkup(REGIONS, resize_keyboard=True)
+        await update.message.reply_text(t(user_id, 'ask_region'), reply_markup=markup)
+        return ASK_REGION
+
+    # To‘liq ro‘yxatdan o‘tdi:
+    return await menu(update, context)
 
 async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -208,87 +218,32 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     subscribed = await check_subscription(user_id, context)
     if subscribed:
-        try:
-            with open("intro.mp4", "rb") as video:
-                await context.bot.send_video_note(chat_id=query.message.chat.id, video_note=video)
-        except Exception as e:
-            await query.message.reply_text(f"❗ Intro video xato: {e}")
-
-        markup = ReplyKeyboardMarkup(
-            [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
-        await query.message.reply_text(TEXTS['uz']['choose_lang'], reply_markup=markup)
-        return ASK_LANG
+        return await start(query, context)
     else:
         await query.answer(t(user_id, 'not_subscribed'), show_alert=True)
         await query.message.reply_text(t(user_id, 'not_subscribed'))
         return CHECK_SUB
 
-async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    markup = ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
-    await update.message.reply_text(t(user_id, 'menu'), reply_markup=markup)
-    return MAIN_MENU
-
 async def ask_lang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
     if 'O‘zbek' in text or 'O\'zbek' in text or 'Uzbek' in text:
-        lang = 'uz'
+        user_data[user_id]['lang'] = 'uz'
     elif 'Русский' in text or 'Russian' in text:
-        lang = 'ru'
+        user_data[user_id]['lang'] = 'ru'
     else:
-        lang = 'uz'
-    user_data[user_id]['lang'] = lang
-    await menu(update, context)
-    return MAIN_MENU
+        user_data[user_id]['lang'] = 'uz'
+    await update.message.reply_text(t(user_id, 'ask_name'), reply_markup=ReplyKeyboardRemove())
+    return ASK_NAME
 
-async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ask_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text
-    if t(user_id, 'order') in text:
-        if user_id in user_data and user_data[user_id].get("phone") and user_data[user_id].get("region"):
-            try:
-                with open("photo_note.mp4", "rb") as vnote:
-                    await context.bot.send_video_note(
-                        chat_id=update.effective_chat.id,
-                        video_note=vnote
-                    )
-                await asyncio.sleep(2)
-            except Exception as e:
-                await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
-            await update.message.reply_text(t(user_id, 'ask_photo'), reply_markup=ReplyKeyboardRemove())
-            return ASK_PHOTO
-        else:
-            return await ask_phone(update, context)
-    elif t(user_id, 'profile') in text:
-        info = user_data[user_id]
-        await update.message.reply_text(
-            t(user_id, 'profile_info').format(
-                name=info.get('name', '-'),
-                phone=info.get('phone', '-'),
-                region=info.get('region', '-'),
-                lang=TEXTS[get_lang(user_id)]['lang_name'][get_lang(user_id)]
-            ),
-            reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
-        )
-        return MAIN_MENU
-    elif t(user_id, 'settings') in text:
-        btns = [
-            [t(user_id, 'change_lang')],
-            [t(user_id, 'change_region')],
-            [t(user_id, 'change_name')],
-            [t(user_id, 'change_phone')],
-            [t(user_id, 'back')]
-        ]
-        markup = ReplyKeyboardMarkup(btns, resize_keyboard=True)
-        await update.message.reply_text(t(user_id, 'settings_menu'), reply_markup=markup)
-        return SETTINGS_MENU
-    else:
-        await menu(update, context)
-        return MAIN_MENU
+    name = update.message.text.strip()
+    user_data[user_id]["name"] = name
+    contact_btn = KeyboardButton("Telefon raqamingizni ulashish", request_contact=True)
+    markup = ReplyKeyboardMarkup([[contact_btn], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True)
+    await update.message.reply_text(t(user_id, 'ask_phone'), reply_markup=markup)
+    return ASK_PHONE
 
 async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -304,9 +259,7 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if update.message.contact:
         phone = update.message.contact.phone_number
-        name = update.message.contact.first_name or ""
         user_data[user_id]["phone"] = phone
-        user_data[user_id]["name"] = name
         markup = ReplyKeyboardMarkup(REGIONS, resize_keyboard=True)
         await update.message.reply_text(t(user_id, 'ask_region'), reply_markup=markup)
         return ASK_REGION
@@ -314,14 +267,11 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t(user_id, 'enter_phone'), reply_markup=ReplyKeyboardRemove())
         return ENTER_PHONE
     else:
-        await update.message.reply_text(t(user_id, 'ask_phone'), reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("Telefon raqamingizni ulashish", request_contact=True)], ["✍️ Qo‘lda kiritish"]], resize_keyboard=True))
-        return ASK_PHONE
+        await ask_phone(update, context)
 
 async def handle_manual_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     phone = update.message.text.strip()
-    name = update.effective_user.first_name or ""
     if not (phone.startswith("+998") and len(phone) == 13 and phone[1:].isdigit()):
         await update.message.reply_text(
             t(user_id, 'invalid_phone'),
@@ -329,7 +279,6 @@ async def handle_manual_phone(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return ENTER_PHONE
     user_data[user_id]["phone"] = phone
-    user_data[user_id]["name"] = name
     markup = ReplyKeyboardMarkup(REGIONS, resize_keyboard=True)
     await update.message.reply_text(t(user_id, 'ask_region'), reply_markup=markup)
     return ASK_REGION
@@ -413,6 +362,44 @@ async def handle_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return MAIN_MENU
 
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    markup = ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
+    await update.message.reply_text(t(user_id, 'menu'), reply_markup=markup)
+    return MAIN_MENU
+
+async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = update.message.text
+    if t(user_id, 'order') in text:
+        return await ask_photo(update, context)
+    elif t(user_id, 'profile') in text:
+        info = user_data[user_id]
+        await update.message.reply_text(
+            t(user_id, 'profile_info').format(
+                name=info.get('name', '-'),
+                phone=info.get('phone', '-'),
+                region=info.get('region', '-'),
+                lang=TEXTS[get_lang(user_id)]['lang_name'][get_lang(user_id)]
+            ),
+            reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
+        )
+        return MAIN_MENU
+    elif t(user_id, 'settings') in text:
+        btns = [
+            [t(user_id, 'change_lang')],
+            [t(user_id, 'change_region')],
+            [t(user_id, 'change_name')],
+            [t(user_id, 'change_phone')],
+            [t(user_id, 'back')]
+        ]
+        markup = ReplyKeyboardMarkup(btns, resize_keyboard=True)
+        await update.message.reply_text(t(user_id, 'settings_menu'), reply_markup=markup)
+        return SETTINGS_MENU
+    else:
+        await menu(update, context)
+        return MAIN_MENU
+
 async def settings_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
@@ -441,12 +428,9 @@ async def change_lang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
     if 'O‘zbek' in text or 'O\'zbek' in text or 'Uzbek' in text:
-        lang = 'uz'
+        user_data[user_id]['lang'] = 'uz'
     elif 'Русский' in text or 'Russian' in text:
-        lang = 'ru'
-    else:
-        lang = get_lang(user_id)
-    user_data[user_id]['lang'] = lang
+        user_data[user_id]['lang'] = 'ru'
     await update.message.reply_text(
         t(user_id, 'changed'),
         reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
@@ -455,8 +439,7 @@ async def change_lang(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def change_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    region = update.message.text.strip()
-    user_data[user_id]['region'] = region
+    user_data[user_id]['region'] = update.message.text.strip()
     await update.message.reply_text(
         t(user_id, 'changed'),
         reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
@@ -465,8 +448,7 @@ async def change_region(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def change_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    name = update.message.text.strip()
-    user_data[user_id]['name'] = name
+    user_data[user_id]['name'] = update.message.text.strip()
     await update.message.reply_text(
         t(user_id, 'changed'),
         reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
@@ -495,11 +477,9 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in ADMIN_IDS:
         await update.message.reply_text("Sizda bu funksiyani ishlatish uchun ruxsat yo‘q.")
         return
-
     users = load_users()
     count = 0
 
-    # Media (photo, video) bilan broadcast uchun
     if update.message.photo:
         file_id = update.message.photo[-1].file_id
         caption = update.message.caption or ""
@@ -521,7 +501,6 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 continue
         await update.message.reply_text(f"{count} ta foydalanuvchiga VIDEO yuborildi.")
     else:
-        # Oddiy matn (linkli, emoji, havola va h.k.)
         text = " ".join(context.args) if context.args else (update.message.text or "")
         for uid in users:
             try:
@@ -541,7 +520,7 @@ if __name__ == "__main__":
         states={
             CHECK_SUB: [CallbackQueryHandler(check_sub_callback)],
             ASK_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_lang)],
-            MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_handler)],
+            ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name)],
             ASK_PHONE: [
                 MessageHandler(filters.CONTACT, handle_phone),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_phone)
@@ -564,8 +543,8 @@ if __name__ == "__main__":
     )
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("broadcast", broadcast))
-    app.add_handler(MessageHandler(filters.PHOTO, broadcast))   # Rasm yuborish uchun
-    app.add_handler(MessageHandler(filters.VIDEO, broadcast))   # Video yuborish uchun
+    app.add_handler(MessageHandler(filters.PHOTO, broadcast))
+    app.add_handler(MessageHandler(filters.VIDEO, broadcast))
 
     print("✅ Bot ishga tushdi, buyurtmalar va profil uchun tayyor!")
     app.run_polling()
