@@ -5,10 +5,7 @@ import asyncio
 from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
-from telegram import (
-    Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove,
-    InlineKeyboardButton, InlineKeyboardMarkup
-)
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     filters, ContextTypes, ConversationHandler, CallbackQueryHandler
@@ -19,8 +16,7 @@ from telegram.ext import (
     SETTINGS_MENU, CHANGE_LANG, CHANGE_REGION, CHANGE_NAME, CHANGE_PHONE, CHECK_SUB
 ) = range(13)
 
-CHANNEL_LINK = "https://t.me/standartuzbekistan"
-CHANNEL_USERNAME = "standartuzbekistan"
+CHANNEL_USERNAME = "standartuzbekistan"  # obuna bo‘lishi shart bo‘lgan kanal
 
 user_data = {}
 
@@ -81,11 +77,9 @@ TEXTS = {
         'lang_name': {'uz': "O‘zbekcha", 'ru': "Ruscha"},
         'changed': "✅ O‘zgartirildi!",
         'menu_btns': [["🛒 Yangi buyurtma"], ["👤 Profil", "⚙️ Sozlamalar"]],
-        'subscribe_text': "Botdan foydalanish uchun avval bizning rasmiy sahifamizga obuna bo‘ling:\n\n👉 [Standart Uzbekistan]({})\n\nObuna bo‘lgan bo‘lsangiz, '✅ Obuna bo‘ldim' tugmasini bosing!".format(CHANNEL_LINK),
-        'sub_button': "✅ Obuna bo‘ldim",
-        'not_subscribed': "❗ Obuna bo‘lmagansiz. Iltimos, [Standart Uzbekistan]({}) kanaliga obuna bo‘ling!".format(CHANNEL_LINK),
+        'subscribe_text': "Botdan foydalanish uchun avval <a href='https://t.me/standartuzbekistan'>standartuzbekistan</a> kanaliga obuna bo‘ling!\n\nObuna bo‘lganingizdan so‘ng <b>✅ Tasdiqlash</b> tugmasini bosing.",
+        'confirm': "✅ Tasdiqlash"
     },
-    # ... RU blokini ham xohlasang qo‘shaman, qisqartirdim
 }
 
 REGIONS = [
@@ -103,76 +97,87 @@ def t(user_id, key):
     lang = get_lang(user_id)
     return TEXTS[lang][key]
 
-# === 1. SUBSCRIBE CHECK ===
+# ---------- OBUNA BOSQICHI -------------
+async def check_sub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    try:
+        member = await context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
+        if member.status in ['member', 'creator', 'administrator']:
+            # Obuna bo‘lgan, keyingi bosqich
+            return await start_step2(update, context)
+        else:
+            return await ask_sub(update, context)
+    except Exception as e:
+        return await ask_sub(update, context)
+
+async def ask_sub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 Kanalga obuna bo‘lish", url=f"https://t.me/{CHANNEL_USERNAME}")],
+        [InlineKeyboardButton("✅ Tasdiqlash", callback_data="checksub")]
+    ])
+    await update.message.reply_text(
+        TEXTS['uz']['subscribe_text'],
+        reply_markup=keyboard,
+        parse_mode="HTML",
+        disable_web_page_preview=True
+    )
+    return CHECK_SUB
+
+async def confirm_sub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    member = await context.bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
+    if member.status in ['member', 'creator', 'administrator']:
+        await query.edit_message_text("Obuna muvaffaqiyatli! Davom etamiz ⬇️")
+        # Boshlanishga o'tish
+        fake_update = Update.de_json(update.to_dict(), context.bot)
+        fake_update.effective_user = query.from_user
+        fake_update.effective_chat = query.message.chat
+        return await start_step2(fake_update, context)
+    else:
+        await query.answer("Iltimos, avval kanalga obuna bo‘ling!", show_alert=True)
+        return CHECK_SUB
+
+# ---------- BOTNING BOSHI /start va asosiy intro video -------------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await ask_sub(update, context)
+
+async def start_step2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in user_data:
         user_data[user_id] = {}
 
-    # Avval kanalga obuna bo‘lishni so‘raymiz
-    kb = InlineKeyboardMarkup(
-        [[InlineKeyboardButton(TEXTS['uz']['sub_button'], callback_data="check_sub")]]
-    )
-    await update.message.reply_text(
-        TEXTS['uz']['subscribe_text'],
-        reply_markup=kb,
-        parse_mode="Markdown"
-    )
-    return CHECK_SUB
-
-async def check_sub(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-
-    # Obuna bo‘lganini tekshiramiz
-    bot = context.bot
-    try:
-        member = await bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
-        if member.status not in ['member', 'administrator', 'creator']:
-            raise Exception("Not subscribed")
-    except:
-        # Obuna bo‘lmasa, yana shu xabar chiqadi
-        kb = InlineKeyboardMarkup(
-            [[InlineKeyboardButton(TEXTS['uz']['sub_button'], callback_data="check_sub")]]
-        )
-        await query.edit_message_text(
-            TEXTS['uz']['not_subscribed'],
-            reply_markup=kb,
-            parse_mode="Markdown"
-        )
-        return CHECK_SUB
-
-    # === 2. Intro video chiqariladi ===
+    # 🎥 Dumaloq video (intro)
     try:
         with open("intro.mp4", "rb") as video:
-            await bot.send_video_note(
-                chat_id=query.message.chat.id,
+            await context.bot.send_video_note(
+                chat_id=update.effective_chat.id,
                 video_note=video
             )
-        await asyncio.sleep(1)
     except Exception as e:
-        await bot.send_message(chat_id=query.message.chat.id, text=f"❗ Video yuborishda xato: {e}")
+        await update.message.reply_text(f"❗ Video yuborishda xato: {e}")
 
-    # Til tanlash menyusi
     markup = ReplyKeyboardMarkup(
         [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
         resize_keyboard=True,
         one_time_keyboard=True
     )
-    await bot.send_message(
-        chat_id=query.message.chat.id,
-        text=TEXTS['uz']['choose_lang'],
-        reply_markup=markup
-    )
+    await update.message.reply_text(TEXTS['uz']['choose_lang'], reply_markup=markup)
     return ASK_LANG
 
-# ==== QOLGAN QISMLAR O‘ZGARMAYDI (AVVALGIDAN COPY) ====
-# Yagona farq — entry_points: /start CallbackQueryHandler(check_sub) bilan
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    markup = ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
+    await update.message.reply_text(t(user_id, 'menu'), reply_markup=markup)
+    return MAIN_MENU
 
-# ... (qolgan funksiya va ConversationHandler kodi SENING OXIRGI KODINGDAGIDAN KO‘CHIRILADI)
+# --- Qolgan funksiyalar (ask_lang, ask_phone, handle_phone...) sendagi oxirgi main.py'dan olib joylashtir ---
+# Yoki avvalgi kodingdan to‘liq olib quyidagidek joylashtir.
 
-# YANGI ConversationHandler:
+# ... Boshqa funksiyalarni (ask_lang, main_menu_handler, ask_phone, ... va boshqalar) ham o‘z o‘rnida yozib chiq!
+
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
     conv_handler = ConversationHandler(
@@ -181,25 +186,11 @@ if __name__ == "__main__":
             CommandHandler('menu', menu)
         ],
         states={
-            CHECK_SUB: [CallbackQueryHandler(check_sub)],
+            CHECK_SUB: [CallbackQueryHandler(confirm_sub, pattern="checksub")],
             ASK_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_lang)],
             MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_handler)],
-            ASK_PHONE: [
-                MessageHandler(filters.CONTACT, handle_phone),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_phone)
-            ],
-            ENTER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_manual_phone)],
-            ASK_REGION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_region)],
-            ASK_PHOTO: [
-                MessageHandler(filters.PHOTO, handle_photo),
-                MessageHandler(filters.ALL, handle_photo)
-            ],
-            ASK_SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_size)],
-            SETTINGS_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, settings_menu_handler)],
-            CHANGE_LANG: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_lang)],
-            CHANGE_REGION: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_region)],
-            CHANGE_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_name)],
-            CHANGE_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, change_phone)],
+            # Qolgan bosqichlar...
+            # ASK_PHONE, ENTER_PHONE, ASK_REGION, ASK_PHOTO, ASK_SIZE, ...
         },
         fallbacks=[
             CommandHandler('start', start),
