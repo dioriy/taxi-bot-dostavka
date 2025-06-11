@@ -158,8 +158,19 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     subscribed = await check_subscription(user_id, context)
     if subscribed:
-        # To‘g‘ri start ni qayta chaqirish uchun query.message ishlatiladi
-        await start(query, context)
+        # VIDEO yuborish va TIL tanlash shu joyda!
+        try:
+            with open("intro.mp4", "rb") as video:
+                await context.bot.send_video_note(chat_id=query.message.chat.id, video_note=video)
+        except Exception as e:
+            await query.message.reply_text(f"❗ Intro video xato: {e}")
+
+        markup = ReplyKeyboardMarkup(
+            [[TEXTS['uz']['lang_uz'], TEXTS['uz']['lang_ru']]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await query.message.reply_text(TEXTS['uz']['choose_lang'], reply_markup=markup)
         return ASK_LANG
     else:
         await query.answer(t(user_id, 'not_subscribed'), show_alert=True)
