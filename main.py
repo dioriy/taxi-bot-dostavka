@@ -494,49 +494,7 @@ async def change_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(t(user_id, 'menu_btns'), resize_keyboard=True)
     )
     return MAIN_MENU
-
-# === UNIVERSAL BROADCAST (matn, rasm, video, link, ...) ===
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS:
-        await update.message.reply_text("Sizda bu funksiyani ishlatish uchun ruxsat yo‘q.")
-        return
-
-    users = load_users()
-    count = 0
-
-    # Media (photo, video) bilan broadcast uchun
-    if update.message.photo:
-        file_id = update.message.photo[-1].file_id
-        caption = update.message.caption or ""
-        for uid in users:
-            try:
-                await context.bot.send_photo(chat_id=uid, photo=file_id, caption=caption)
-                count += 1
-            except Exception:
-                continue
-        await update.message.reply_text(f"{count} ta foydalanuvchiga RASM yuborildi.")
-    elif update.message.video:
-        file_id = update.message.video.file_id
-        caption = update.message.caption or ""
-        for uid in users:
-            try:
-                await context.bot.send_video(chat_id=uid, video=file_id, caption=caption)
-                count += 1
-            except Exception:
-                continue
-        await update.message.reply_text(f"{count} ta foydalanuvchiga VIDEO yuborildi.")
-    else:
-        # Oddiy matn (linkli, emoji, havola va h.k.)
-        text = " ".join(context.args) if context.args else (update.message.text or "")
-        for uid in users:
-            try:
-                await context.bot.send_message(chat_id=uid, text=text)
-                count += 1
-            except Exception:
-                continue
-        await update.message.reply_text(f"{count} ta foydalanuvchiga MATN yuborildi.")
-
+ 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
     conv_handler = ConversationHandler(
@@ -568,10 +526,6 @@ if __name__ == "__main__":
         ],
         allow_reentry=True,
     )
-    app.add_handler(conv_handler)
-    app.add_handler(CommandHandler("broadcast", broadcast))
-    app.add_handler(MessageHandler(filters.PHOTO, broadcast))   # Rasm yuborish uchun
-    app.add_handler(MessageHandler(filters.VIDEO, broadcast))   # Video yuborish uchun
 
     print("✅ Bot ishga tushdi, buyurtmalar va profil uchun tayyor!")
     app.run_polling()
